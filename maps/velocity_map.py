@@ -7,7 +7,7 @@ import os
 import argparse
 
 
-def make_map():
+def make_vmap():
 
     return
 
