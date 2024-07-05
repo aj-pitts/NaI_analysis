@@ -22,7 +22,7 @@ def scp_directories(host, port, username, password, remote_dirs, local_dir, getc
             remote_path = remote_dirs[key]
             
             # define the local path
-            local_path_rename = os.path.join(local_dir, f'{key}')
+            local_path_rename = os.path.join(local_dir, f'{key}/')
 
             # create the shell command
             scp_command = f"scp -r {username}@{host}:{remote_path} {local_path_rename}"
@@ -48,40 +48,41 @@ def scp_directories(host, port, username, password, remote_dirs, local_dir, getc
 
 if __name__ == "__main__":
     # input the galaxy name and binning key
-    galname = input("Enter Galaxy Name:")
-    binkey = input("Enter binkey")
+    galname = input("Enter Galaxy Name:\n")
+    binkey = input("Enter binkey:\n")
 
     # define remote directory of the data
-    remote_dir = f"{galname}-{binkey}'
+    remote_dir = f"{galname}-{binkey}/"
 
     # define the server and login information
     server = 'inrainbows'
     port = 22
     user = 'apitts'
-    password = input(f"Enter password for {user}@{server}")
+    password = input(f"Enter password for {user}@{server}:\n")
 
     # inrainbows paths to the mcmc and cube outputs
-    mcmc_path = "NaImcmcIFU/muse/NaI_MCMC_output"
-    cube_path = "mangadap_muse/outputs"
+    mcmc_path = os.path.join("NaImcmcIFU/muse/NaI_MCMC_output",remote_dir)
+    cube_path = os.path.join("mangadap_muse/outputs",remote_dir)
 
     # dict to hold remote paths
     remote_dirs = {
-        'cube':os.path.join(cube_path,remote_dir),
-        'mcmc':os.path.join(mcmc_path,remote_dir)
+        'cube':cube_path,
+        'mcmc':mcmc_path
     }
 
     # define full path to local data
-    local_path = os.path.abspath(__file__)
+    local_path = os.path.dirname(os.path.abspath(__file__))
     local_dir = os.path.join(local_path,f"data/{galname}")
 
     # if directory for the galaxy does not exist, make it
-    if not os.path.exists(local_path):
-                os.mkdir(local_path)
+    if not os.path.exists(local_dir):
+                print(f"Making directory {local_dir}")
+                os.mkdir(local_dir)
 
     # getcubes flag to determine whether to pull the cubes files or just mcmc files
     getcubes = None
     while getcubes is None:
-        ask = input("Include the Maps and Cubes? [Y/N]")
+        ask = input("Include the Maps and Cubes? [Y/N]\n")
 
         if ask.lower() == 'y':
             getcubes = True
