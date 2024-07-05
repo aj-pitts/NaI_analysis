@@ -25,35 +25,32 @@ def main():
     # inrainbows paths to the mcmc and cube outputs
     mcmc_path = os.path.join("NaImcmcIFU/muse/NaI_MCMC_output",remote_dir)
     cube_path = os.path.join("mangadap_muse/outputs",remote_dir)
+    ini_path = os.path.join(f"mangadap_muse/MUSE_cubes/{galname}/*.ini")
 
     # set up local paths
     local_path = os.path.dirname(os.path.abspath(__file__))
     local_dir = os.path.join(local_path,f"data/{galname}")
     local_dir_cube = os.path.join(local_dir,"cube/")
     local_dir_mcmc = os.path.join(local_dir,"mcmc/")
+    local_dir_ini = os.path.join(local_dir,"config/")
+
+    dir_list = [local_dir_cube, local_dir_mcmc, local_dir_ini]
 
     # if directory for the galaxy does not exist, make it
-    if not os.path.exists(local_dir):
-        print(f"Making directory {local_dir}")
-        os.mkdir(local_dir)
+    for dir in dir_list:
+        if not os.path.exists(dir):
+            print(f"Making directory {dir}.\n")
+            os.mkdir(dir)
 
-    if not os.path.exists(local_dir_cube):    
-        print(f"Making directory {local_dir_cube}")
-        os.mkdir(local_dir_cube)
-
-    if not os.path.exists(local_dir_mcmc):    
-        print(f"Making directory {local_dir_mcmc}")
-        os.mkdir(local_dir_mcmc)
-
-    for dir in [local_dir_cube, local_dir_mcmc]:
+    # warn if a directory is not empty
+    for dir in dir_list:
         if len(glob(f"{dir}/*")) > 0:
             print(f"WARNING: '{dir}' is not an empty directory\n")
 
+    print("SCP COMMANDS:\n")
     print(f"scp -r apitts@inrainbows:{cube_path} {local_dir_cube}")
-
-    print("\n")
-
-    print(print(f"scp -r apitts@inrainbows:{mcmc_path} {local_dir_mcmc}"))
+    print(f"scp -r apitts@inrainbows:{mcmc_path} {local_dir_mcmc}")
+    print(f"scp -r 'apitts@inrainbows:{ini_path}' {local_dir_ini}")
 
 if __name__ == "__main__":
     main()

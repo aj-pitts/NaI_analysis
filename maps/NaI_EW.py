@@ -1,16 +1,20 @@
 import numpy as np
 import matplotlib.pyplot as plt
-plt.style.use('~/figures.mplstyle')
 from astropy.io import fits
 import logging
 import argparse
+import configparser
 import os
 from glob import glob
 from tqdm import tqdm
+import sys
 import logging
 import warnings
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../modules/")))
+from util import clean_ini_file
 
 
 def EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_warnings=True):
@@ -130,8 +134,8 @@ def EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_
     
     plt.hist(flatewcleaned,bins=int(nbins),color='k')
     plt.xlim(-5,5)
-    plt.xlabel('$\mathrm{EW_{Na\ I}\ (\AA)}$')
-    plt.ylabel('$N_{\mathrm{spax}}$')
+    plt.xlabel(r'$\mathrm{EW_{Na\ I}\ (\AA)}$')
+    plt.ylabel(r'$N_{\mathrm{spax}}$')
     
     im2name = f"{args.galname}-EW_distribution.png"
     output = os.path.join(savepath,im2name)
@@ -149,7 +153,7 @@ def EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_
  
     plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=vmax)
            #extent=[32.4, -32.6,-32.4, 32.6])
-    plt.colorbar(label='$\mathrm{EW_{Na\ I}\ (\AA)}$',fraction=0.0465, pad=0.01)
+    plt.colorbar(label=r'$\mathrm{EW_{Na\ I}\ (\AA)}$',fraction=0.0465, pad=0.01)
     plt.gca().set_facecolor('lightgray')
     plt.xlabel('Spaxel')
     plt.ylabel('Spaxel')
@@ -172,7 +176,7 @@ def get_args():
     
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
-    parser.add_argument('redshift',type=str,help='Input galaxy redshift guess.')
+    parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
     
     return parser.parse_args()
 
@@ -181,7 +185,7 @@ def get_args():
 def main(args):
     ## Full path of the script directory
     script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
+    plt.style.use(os.path.join(script_dir,"figures.mplstyle"))
     ## Full path of the DAP outputs
     data_dir = os.path.join(script_dir, "data")
 
@@ -214,21 +218,45 @@ def main(args):
     
     redshift = args.redshift
 
-    """
+    
     if redshift is None:
         ## Get the redshift guess from the .ini file
-        raw_cube_dir = os.path.join(script_dir,'MUSE_cubes',args.galname)
-        ini_fil = glob(f"{raw_cube_dir}/*.ini")
+        config_dir = os.path.join(data_dir,cube_dir,"config")
+        ini_fil = glob(f"{config_dir}/*.ini")
         if len(ini_fil)>1:
-            raise ValueError(f"Multiple configuration files found in {raw_cube_dir}")
+            warnings.warn(f"Multiple configuration files found in {config_dir}.",UserWarning)
+            config_fil = ini_fil[0]
+            for fil in ini_fil:
+                if 'cleaned' in fil:
+                    config_fil = fil
 
-        config = DefaultConfig(ini_fil[0],interpolate=True)
-        redshift = config.get('z',default=None)
-    """
+            print(f"Defauling configuration file to {config_fil}.")
+
+
+        config = configparser.ConfigParser()
+        parsing = True
+        while parsing:
+            try:
+                config.read(config_fil)
+                parsing = False
+            except configparser.Error as e:
+                print(f"Error parsing file: {e}")
+                print(f"Cleaning {config_fil}")
+                clean_ini_file(config_fil, overwrite=True)
+
+
+        redshift = config['default']['z']
+        print(f"Redshift z={redshift} found in {config_fil}.")
+    
 
     W_equiv,bins = EW_map(cubefil,mapfil,redshift,savepath,bad_bins=True)
     
-    savefits = os.path.join(savepath,f"{cube_dir}_EW-Map.fits")
+    mapspath = os.path.join(data_dir,cube_dir,"maps")
+    if not os.path.exists(mapspath):
+        os.mkdir(mapspath)
+
+    savefits = os.path.join(mapspath,f"{cube_dir}_EW-Map.fits")
+
     logging.info(f"Writing EW Map data to {savefits}")
     
     hdu = fits.PrimaryHDU(W_equiv)
@@ -246,5 +274,4 @@ def main(args):
     
 if __name__ == "__main__":
     args = get_args()
-    from mangadap.util.parser import DefaultConfig
     main(args)
