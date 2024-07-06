@@ -199,7 +199,7 @@ def main(args):
         os.makedirs(savepath)
     
     ## All fits files within cube path
-    fils = glob(os.path.join(cubepath_bc,'**','*.fits'),recursive=True)
+    fils = glob(os.path.join(cubepath_bc,"BETA-CORR",'**','*.fits'),recursive=True)
     
     ## Finds the logcube and map files from the DAP output
     cubefil = None
@@ -223,9 +223,9 @@ def main(args):
         ## Get the redshift guess from the .ini file
         config_dir = os.path.join(data_dir,cube_dir,"config")
         ini_fil = glob(f"{config_dir}/*.ini")
+        config_fil = ini_fil[0]
         if len(ini_fil)>1:
             warnings.warn(f"Multiple configuration files found in {config_dir}.",UserWarning)
-            config_fil = ini_fil[0]
             for fil in ini_fil:
                 if 'cleaned' in fil:
                     config_fil = fil
