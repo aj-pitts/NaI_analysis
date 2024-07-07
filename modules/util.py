@@ -30,3 +30,11 @@ def clean_ini_file(input_file, overwrite=False):
 
     print("Done.")
 
+def check_filepath(filepath,mkdir=True):
+    if not os.path.exists(filepath):
+        if mkdir:
+            print(f"Creating filepath: {filepath}")
+            os.mkdir(filepath)
+        else:
+            raise ValueError(f"'{filepath}' does not exist")
+

@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
-import logging
 import argparse
 import configparser
 import os
@@ -17,7 +16,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../modu
 from util import clean_ini_file
 
 
-def EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_warnings=True):
+def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_warnings=True):
     c = 2.998e5
     
     if isinstance(z_guess, str):
@@ -249,7 +248,7 @@ def main(args):
         print(f"Redshift z={redshift} found in {config_fil}.")
     
 
-    W_equiv,bins = EW_map(cubefil,mapfil,redshift,savepath,bad_bins=True)
+    W_equiv,bins = make_EW_map(cubefil,mapfil,redshift,savepath,bad_bins=True)
     
     mapspath = os.path.join(data_dir,cube_dir,"maps")
     if not os.path.exists(mapspath):
