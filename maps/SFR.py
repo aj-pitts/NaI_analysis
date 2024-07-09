@@ -32,6 +32,7 @@ def correct_dust(F_Ha, F_Hb, HaHb_ratio = 2.87, Rv = 3.1, k_Ha = 2.45, k_Hb = 3.
 
     power = 0.4 * A_gas
     F_corr[w] = F_Ha[w] * (10 ** power[w])
+    F_corr[~w] = np.nan
 
     return F_corr
 
@@ -59,6 +60,8 @@ def SFR_map(map_fil,redshift,figpath):
     c = 2.998e5 * u.km / u.s
 
     sfrmap = np.zeros(binid.shape)
+    sfrdensitymap = np.zeros(binid.shape)
+
     uniqids = np.unique(binid)
     for ID in tqdm(uniqids[1:], desc="Constructing SFR map"):
         w = (binid == ID)
@@ -68,15 +71,19 @@ def SFR_map(map_fil,redshift,figpath):
 
         sv = np.median(stellar_vel[w])
         z = ((sv * (1+redshift))/c.value + redshift)
-        D = ((c * z / H0).to(u.cm)).value
+        D = (c * z / H0)
 
-        luminosity = 4 * np.pi * D**2 * ha_flux * 1e-17
+        luminosity = 4 * np.pi * (D.to(u.cm).value)**2 * ha_flux * 1e-17
         SFR = np.log10(luminosity) - 41.27
+        sigma_SFR = SFR / ((0.2 * (D.to(u.kpc).value)))**2
+
         sfrmap[w] = SFR
+        sfrdensitymap[w] = sigma_SFR
 
     logging.info("Creating plots.")
-    vmin = int(np.median(sfrmap) - np.std(sfrmap))
-    vmax = int(np.median(sfrmap) + np.std(sfrmap))
+    w = np.isfinite(sfrmap)
+    vmin = int(np.median(sfrmap[w]) - np.std(sfrmap[w]))
+    vmax = int(np.median(sfrmap[w]) + np.std(sfrmap[w]))
     plotmap = np.copy(sfrmap)
 
     w = (plotmap<vmin) | (plotmap>vmax)
@@ -93,7 +100,27 @@ def SFR_map(map_fil,redshift,figpath):
     logging.info(f"SFR map plot saved to {imname}")
     plt.close()
 
-    flatmap = sfrmap.flatten()
+    #vmin = int(np.median(sfrdensitymap) - 4 * np.std(sfrdensitymap))
+    #vmax = int(np.median(sfrdensitymap) + 4 * np.std(sfrdensitymap))
+    plotmap = np.copy(sfrdensitymap)
+
+    #w = (plotmap<vmin) | (plotmap>vmax)
+    #plotmap[w] = np.nan
+
+    plt.imshow(plotmap,cmap='rainbow',origin='lower')
+    plt.gca().set_facecolor('lightgray')
+    plt.xlabel("Spaxel")
+    plt.ylabel("Spaxel")
+    plt.colorbar(label=r"$\mathrm{\Sigma_{SFR}\ (M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
+    
+    imname = os.path.join(figpath,f"{args.galname}_SFR-density-map.png")
+    plt.savefig(imname,bbox_inches='tight',dpi=200)
+    logging.info(f"SFR surface density map plot saved to {imname}")
+    plt.close()
+
+    w = np.isfinite(sfrmap)
+    finite_map = sfrmap[w]
+    flatmap = finite_map.flatten()
     flatmap = flatmap[flatmap!=0]
     bin_width = 3.5 * np.std(flatmap) / (flatmap.size ** (1/3))
     nbins = (max(flatmap) - min(flatmap)) / bin_width

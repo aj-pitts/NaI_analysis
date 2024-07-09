@@ -1,5 +1,10 @@
 import configparser
 import os
+import numpy as np
+import matplotlib.pyplot as plt
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 def clean_ini_file(input_file, overwrite=False):
     if overwrite:
@@ -38,3 +43,21 @@ def check_filepath(filepath,mkdir=True):
         else:
             raise ValueError(f"'{filepath}' does not exist")
 
+def create_map_plot(image, savepath=None, label=None,deviations=1):
+    vmin = int(np.median(image) - deviations * np.std(image))
+    vmax = int(np.median(image) + deviations * np.std(image))
+    
+    w = (image < vmin) | (image > vmax)
+    image[w] = np.nan
+    
+    plt.imshow(image,vmin=vmin,vmax=vmax,origin='lower')
+    plt.xlabel("Spaxel")
+    plt.ylabel("Spaxel")
+    plt.colorbar(label, fraction=0.0465, pad=0.01)
+    
+    if savepath is not None:
+        plt.savefig(savepath,bbox_inches='tight',dpi=200)
+        logging.info(f"Saving figure to {savepath}")
+        plt.close()
+    else:
+        plt.show()
