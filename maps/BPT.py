@@ -1,15 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
-from astropy.table import Table, join
 from glob import glob
 import os
 import argparse
-from tqdm import tqdm
 import sys
 import astropy.units as u
-import warnings
-import configparser
 
 import logging
 logger = logging.getLogger()
@@ -86,33 +82,33 @@ def BPT(map_fil, fig_output):
     fig, ax = plt.subplots(1,3,figsize=(12,4),sharey=True)
 
 
-    ax[0].plot(nii_ha,oiii_hb,'v',color='k',ms=1,alpha=0.35)
+    ax[0].plot(nii_ha,oiii_hb,'v',color='k',ms=1,alpha=0.25)
 
     demarcation = lambda log_lr: 0.61 / (log_lr - 0.05) + 1.3
     classification = demarcation(fake_niiha)
     w = fake_niiha < 0.05
     ax[0].plot(fake_niiha[w], classification[w], color='r')
-    ax[0].set_ylabel(r"$\mathrm{(log[O\ III]/H \beta)}$")
-    ax[0].set_xlabel(r"$\mathrm{(log[N\ II]/H \alpha)}$")
+    ax[0].set_ylabel(r"$\mathrm{log([O\ III]/H \beta)}$")
+    ax[0].set_xlabel(r"$\mathrm{log([N\ II]/H \alpha)}$")
 
 
 
-    ax[1].plot(sii_ha,oiii_hb, 'v', color='k',ms=1,alpha=0.35)
+    ax[1].plot(sii_ha,oiii_hb, 'v', color='k',ms=1,alpha=0.25)
     
     demarcation = lambda log_lr: 0.72 / (log_lr - 0.32) + 1.3
     classification = demarcation(fake_siiha)
     w = fake_siiha < 0.32
     ax[1].plot(fake_siiha[w], classification[w], color='r')
-    ax[1].set_xlabel(r"$\mathrm{(log[S\ II]/H \alpha)}$")
+    ax[1].set_xlabel(r"$\mathrm{log([S\ II]/H \alpha)}$")
 
 
-    ax[2].plot(oi_ha,oiii_hb, 'v', color='k',ms=1,alpha=0.35)
+    ax[2].plot(oi_ha,oiii_hb, 'v', color='k',ms=1,alpha=0.25)
 
     demarcation = lambda log_lr: 0.73 / (log_lr - 0.59) + 1.33
     classification = demarcation(fake_oiha)
     w = fake_oiha < 0.59
     ax[2].plot(fake_oiha[w], classification[w], color='r')
-    ax[2].set_xlabel(r"$\mathrm{(log[O\ I]/H \alpha)}$")
+    ax[2].set_xlabel(r"$\mathrm{log([O\ I]/H \alpha)}$")
 
     ax[0].set_xlim(np.min(nii_ha[np.isfinite(nii_ha)]),np.max(nii_ha[np.isfinite(nii_ha)]))
     ax[0].set_ylim(np.min(oiii_hb[np.isfinite(oiii_hb)]),np.max(oiii_hb[np.isfinite(oiii_hb)]))
