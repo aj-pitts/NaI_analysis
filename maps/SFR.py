@@ -207,7 +207,6 @@ def main(args):
         print(f"Redshift z={redshift} found in {config_fil}.")
     
 
-    print("########################################################\n########################################################")
     logging.info("Constructing SFR map.")
     sfr = SFR_map(map_fil, redshift, fig_output_path)
 

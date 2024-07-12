@@ -192,7 +192,7 @@ def BPT(map_fil, fig_output):
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description="A script to create a SFR map from the DAP emline results of a beta-corrected galaxy.")
+    parser = argparse.ArgumentParser(description="A script to create BPT plots and a spaxel classification map from the DAP emline results of a beta-corrected galaxy.")
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
@@ -233,9 +233,9 @@ def main(args):
     
     
 
-    map_output_fil = os.path.join(map_output_path, f"{args.galname}_SFR-Map.fits")
+    map_output_fil = os.path.join(map_output_path, f"{args.galname}_BPT-ID-Map.fits")
 
-    logging.info(f"Writing SFR map to {map_output_fil}")
+    logging.info(f"Writing BPT classification IDs to {map_output_fil}")
     class_map = BPT(map_fil, fig_output_path)
     hdu = fits.PrimaryHDU(class_map)
     hdu.header['DESC'] = f"BPT Classification ID Map for galaxy {args.galname}"

@@ -190,7 +190,7 @@ def main(args):
 
     ## Path to the specific galaxy and binning method input
     cube_dir = f"{args.galname}"
-    cubepath_bc = os.path.join(data_dir,cube_dir,"cube")
+    cubepath_bc = os.path.join(data_dir,cube_dir,"cube",f"{args.galname}-{args.bin_method}")
     
     ## Path to save the plots
     savepath = os.path.join(script_dir,"figures",'EW-Map')
