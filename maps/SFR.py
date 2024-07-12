@@ -89,10 +89,11 @@ def SFR_map(map_fil,redshift,figpath):
     w = (plotmap<vmin) | (plotmap>vmax)
     plotmap[w] = np.nan
 
-    plt.imshow(plotmap,cmap='rainbow',vmin=vmin,vmax=vmax,origin='lower')
+    plt.imshow(plotmap,cmap='rainbow',vmin=vmin,vmax=vmax,origin='lower',
+               extent=[32.4, -32.6,-32.4, 32.6])
     plt.gca().set_facecolor('lightgray')
-    plt.xlabel("Spaxel")
-    plt.ylabel("Spaxel")
+    plt.xlabel(r'$\alpha$ (arcsec)')
+    plt.ylabel(r'$\delta$ (arcsec)')
     plt.colorbar(label=r"$\mathrm{SFR\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
     
     imname = os.path.join(figpath,f"{args.galname}_SFR-map.png")
@@ -107,10 +108,11 @@ def SFR_map(map_fil,redshift,figpath):
     #w = (plotmap<vmin) | (plotmap>vmax)
     #plotmap[w] = np.nan
 
-    plt.imshow(plotmap,cmap='rainbow',origin='lower')
+    plt.imshow(plotmap,cmap='rainbow',origin='lower',
+               extent=[32.4, -32.6,-32.4, 32.6])
     plt.gca().set_facecolor('lightgray')
-    plt.xlabel("Spaxel")
-    plt.ylabel("Spaxel")
+    plt.xlabel(r'$\alpha$ (arcsec)')
+    plt.ylabel(r'$\delta$ (arcsec)')
     plt.colorbar(label=r"$\mathrm{\Sigma_{SFR}\ (M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
     
     imname = os.path.join(figpath,f"{args.galname}_SFR-density-map.png")

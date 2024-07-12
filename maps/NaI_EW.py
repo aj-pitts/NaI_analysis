@@ -150,12 +150,12 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     if vmax < nvmax:
         vmax = np.round(nvmax)
  
-    plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=vmax)
-           #extent=[32.4, -32.6,-32.4, 32.6])
+    plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=vmax,
+           extent=[32.4, -32.6,-32.4, 32.6])
     plt.colorbar(label=r'$\mathrm{EW_{Na\ I}\ (\AA)}$',fraction=0.0465, pad=0.01)
     plt.gca().set_facecolor('lightgray')
-    plt.xlabel('Spaxel')
-    plt.ylabel('Spaxel')
+    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+    plt.ylabel(r'$\Delta \delta$ (arcsec)')
     
     im1name = f"{args.galname}-EW_map.png"
     output = os.path.join(savepath,im1name)

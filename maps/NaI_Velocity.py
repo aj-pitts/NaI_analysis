@@ -43,10 +43,11 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
     w = (plotmap<-minmax) | (plotmap>minmax)
     plotmap[w] = np.nan
 
-    plt.imshow(plotmap,cmap='coolwarm',vmin=-minmax,vmax=minmax,origin='lower')
+    plt.imshow(plotmap,cmap='coolwarm',vmin=-minmax,vmax=minmax,origin='lower',
+               extent=[32.4, -32.6,-32.4, 32.6])
     #plt.gca().set_facecolor('lightgray')
-    plt.xlabel("Spaxel")
-    plt.ylabel("Spaxel")
+    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+    plt.ylabel(r'$\Delta \delta$ (arcsec)')
     plt.colorbar(label=r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$",fraction=0.0465, pad=0.01)
     
     imname = os.path.join(figpath,f"{args.galname}_velocity-map.png")
