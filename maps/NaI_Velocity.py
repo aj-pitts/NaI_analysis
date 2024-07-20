@@ -43,7 +43,7 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
     w = (plotmap<-minmax) | (plotmap>minmax)
     plotmap[w] = np.nan
 
-    plt.imshow(plotmap,cmap='coolwarm',vmin=-minmax,vmax=minmax,origin='lower',
+    plt.imshow(plotmap,cmap='bwr',vmin=-minmax,vmax=minmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
     #plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\Delta \alpha$ (arcsec)')

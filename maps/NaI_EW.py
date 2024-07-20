@@ -14,6 +14,7 @@ logger.setLevel(logging.INFO)
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../modules/")))
 from util import clean_ini_file
+from interactive_plot import make_bokeh_map
 
 
 def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_warnings=True):
@@ -42,27 +43,22 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     
     l, ny, nx = flux.shape
     ewmap = np.zeros((ny,nx))
-    
+    #flux_window = np.zeros((ny,nx,30))
+    #model_window = np.zeros((ny,nx,30))
+    wave_window = np.zeros((l,ny,nx))
+    #ivar_window = np.zeros((ny,nx,30))
+
     logging.info('Constructing equivalent width map.')
     for ID in uniqids[1:]:
         inds = np.where(binid == ID)
         w = binid == ID
-        
-        
-        ## get the stellar velocity of the bin, make sure it is within acceptable range of the distribution
+
+        ## get the stellar velocity of the bin
         sv = stellarvel[w][0]
-        if abs(sv) > 4 * np.std(stellarvel):
-            if show_warnings:
-                warnings.warn(f"Stellar velocity in Bin ID {ID} beyond 4 standard deviations. Bin {ID} EW set to Nan",UserWarning,
-                             stacklevel=2)
-            ewmap[w] = np.nan
-            if bad_bins:
-                bbins.append(ID)
-            continue
             
         ## Calculate redshift
         z = (sv * (1+z_guess))/c + z_guess
-        
+
         # shift wavelengths to restframe
         restwave = wave / (1+z)
         
@@ -71,14 +67,33 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
         Lam = restwave[inbounds]
         fluxbound = flux[inbounds,:,:]
         modelbound = model[inbounds,:,:]
-        
-        
+
+        for y in inds[0]:
+            for x in inds[1]:
+                wave_window[:,y,x] = restwave        
+
         ## check the flux and model in the bin
         
         # slice the flux/model to just those in the current bin
         fluxbin = fluxbound[:,inds[0],inds[1]]
         modelbin = modelbound[:,inds[0],inds[1]]
-                
+
+
+        # for bokeh
+        #flux_window[inds[0],inds[1],:] = fluxbin[:,0]
+        #model_window[inds[0],inds[1],:] = modelbin[:,0]
+        #wave_window[inds[0],inds[1],:] = Lam 
+        #ivar_window[inds[0],inds[1],:] = ivarbin[:,0]
+
+        if abs(sv) > 4 * np.std(stellarvel):
+            if show_warnings:
+                warnings.warn(f"Stellar velocity in Bin ID {ID} beyond 4 standard deviations. Bin {ID} EW set to Nan",UserWarning,
+                             stacklevel=2)
+            ewmap[w] = np.nan
+            if bad_bins:
+                bbins.append(ID)
+            continue
+
         # make sure flux is identical throughout the bin
         if not np.all(fluxbin == fluxbin[:,0][:,np.newaxis]):
             if show_warnings:
@@ -163,6 +178,14 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     logging.info(f"EW map plot saved to {output}")
     plt.close()
     
+
+    logging.info("Creating BOKEH plot.")
+    bokeh_output = os.path.join(savepath,f"{args.galname}-EW_bokeh.html")
+
+    make_bokeh_map(flux, model, ivar, wave_window, ewmap, bokeh_output)
+
+    logging.info(f"BOKEH plot saved to {bokeh_output}")
+
     if bad_bins:
         return ewmap, bbins
     
