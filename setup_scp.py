@@ -30,6 +30,11 @@ def main():
     # set up local paths
     local_path = os.path.dirname(os.path.abspath(__file__))
     local_dir = os.path.join(local_path,f"data/{galname}")
+
+    if not os.path.exists(local_dir):
+        print(f"Making directory {local_dir}")
+        os.mkdir(local_dir)
+
     local_dir_cube = os.path.join(local_dir,"cube/")
     local_dir_mcmc = os.path.join(local_dir,"mcmc/")
     local_dir_ini = os.path.join(local_dir,"config/")
@@ -51,6 +56,7 @@ def main():
     print(f"scp -r apitts@inrainbows:{cube_path} {local_dir_cube}")
     print(f"scp -r apitts@inrainbows:{mcmc_path} {local_dir_mcmc}")
     print(f"scp -r 'apitts@inrainbows:{ini_path}' {local_dir_ini}")
+    print("\n\n")
 
 if __name__ == "__main__":
     main()
