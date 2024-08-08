@@ -17,9 +17,9 @@ def get_args():
     return parser.parse_args()
 
 def main(args):
-    scripts = glob('*.py')
-    scripts.remove('create_all_maps.py')
-    scripts.remove('__init__.py')
+    scripts = glob('maps/*.py')
+    #scripts.remove('create_all_maps.py')
+    scripts.remove('maps/__init__.py')
 
     for script in scripts:
         try:

@@ -43,10 +43,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     
     l, ny, nx = flux.shape
     ewmap = np.zeros((ny,nx))
-    #flux_window = np.zeros((ny,nx,30))
-    #model_window = np.zeros((ny,nx,30))
-    wave_window = np.zeros((l,ny,nx))
-    #ivar_window = np.zeros((ny,nx,30))
+    wavecube = np.zeros(flux.shape)
 
     logging.info('Constructing equivalent width map.')
     for ID in uniqids[1:]:
@@ -61,29 +58,21 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
 
         # shift wavelengths to restframe
         restwave = wave / (1+z)
-        
+
+        for y,x in zip(inds[0],inds[1]):
+            wavecube[np.arange(len(restwave)),y,x] = restwave
+
         # define wavelength boundaries and slice flux, model, and wavelength arrays
         inbounds = np.where((restwave>region[0]) & (restwave<region[1]))[0]
         Lam = restwave[inbounds]
         fluxbound = flux[inbounds,:,:]
-        modelbound = model[inbounds,:,:]
-
-        for y in inds[0]:
-            for x in inds[1]:
-                wave_window[:,y,x] = restwave        
+        modelbound = model[inbounds,:,:]       
 
         ## check the flux and model in the bin
         
         # slice the flux/model to just those in the current bin
         fluxbin = fluxbound[:,inds[0],inds[1]]
         modelbin = modelbound[:,inds[0],inds[1]]
-
-
-        # for bokeh
-        #flux_window[inds[0],inds[1],:] = fluxbin[:,0]
-        #model_window[inds[0],inds[1],:] = modelbin[:,0]
-        #wave_window[inds[0],inds[1],:] = Lam 
-        #ivar_window[inds[0],inds[1],:] = ivarbin[:,0]
 
         if abs(sv) > 4 * np.std(stellarvel):
             if show_warnings:
@@ -119,12 +108,12 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
         
         if not all(F>=0) or not all(M>=0):
             if show_warnings:
-                warnings.warn(f"Flux or model arrays in Bin {ID} contain values < 0. EW set to NaN", UserWarning,
+                warnings.warn(f"Flux or model arrays in Bin {ID} contain values < 0. Logging Bin ID.", UserWarning,
                              stacklevel=2)
-            ewmap[w] = np.nan
+            #ewmap[w] = np.nan
             if bad_bins:
                 bbins.append(ID)
-            continue
+            #continue
             
             
         # create dlambda array
@@ -132,7 +121,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
         dLam = np.insert(dLam, 0, dLam[0])
         
         # exclude models equal to zero to avoid nan in calculation
-        nonzero = M != 0
+        nonzero = (M != 0) & (F != 0)
         cont = np.ones(np.sum(nonzero))
         W = np.sum( (cont - (F[nonzero])/M[nonzero]) * dLam[nonzero] )
         ewmap[w] = W
@@ -178,13 +167,11 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     logging.info(f"EW map plot saved to {output}")
     plt.close()
     
+    if args.bokeh:
+        logging.info("Creating BOKEH plot.")
+        keyword = f"{args.galname}-EW-bokeh"
+        make_bokeh_map(flux, model, ivar, wavecube, ewmap, binid, savepath, keyword)
 
-    logging.info("Creating BOKEH plot.")
-    bokeh_output = os.path.join(savepath,f"{args.galname}-EW_bokeh.html")
-
-    make_bokeh_map(flux, model, ivar, wave_window, ewmap, bokeh_output)
-
-    logging.info(f"BOKEH plot saved to {bokeh_output}")
 
     if bad_bins:
         return ewmap, bbins
@@ -199,6 +186,7 @@ def get_args():
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
+    parser.add_argument('--bokeh', type=bool, help="Input [True/False] for creating a Bokeh interactive plot.", default = False)
     
     return parser.parse_args()
 

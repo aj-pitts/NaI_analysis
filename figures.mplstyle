@@ -3,22 +3,24 @@ mathtext.fontset : stix
 
 axes.linewidth : 1.8
 figure.figsize : 6, 6
-axes.labelsize : 16
+axes.labelsize : 20
+lines.linewidth : 2
 
 ytick.minor.visible : True
-xtick.minor.visible : True
-xtick.direction : in
 ytick.direction : in
-
-xtick.major.width : 1.6
-xtick.minor.width : 1
 ytick.major.width : 1.6
 ytick.minor.width : 1
-xtick.top : True
 ytick.right : True
-xtick.major.top : True
-xtick.minor.top : True
 ytick.major.right : True
 ytick.minor.right : True
+ytick.labelsize : 15
 
-lines.linewidth : 2
+xtick.minor.visible : True
+xtick.direction : in
+xtick.major.width : 1.6
+xtick.minor.width : 1
+xtick.top : True
+xtick.major.top : True
+xtick.minor.top : True
+xtick.labelsize : 15
+

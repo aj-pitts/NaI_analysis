@@ -1,28 +1,29 @@
 import bokeh.plotting as bp
-from bokeh.models import ColumnDataSource, TapTool, CustomJS, ColorBar, LinearColorMapper
+from bokeh.models import ColumnDataSource, TapTool, CustomJS, ColorBar, LinearColorMapper, Div
 from bokeh.layouts import column
 from bokeh.transform import linear_cmap
-from bokeh.io import output_file, show
+from bokeh.io import output_file, show, save
 from bokeh.models import BasicTicker, ColorBar
 
 import numpy as np
+import os
 
 def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keyword, palette="Turbo256", show=False):
     x, y = np.meshgrid(np.arange(map.shape[1]), np.arange(map.shape[0]))
-    source = ColumnDataSource(data=dict(x=x.ravel(), y=y.ravel(), width=map.ravel()))
+    source = ColumnDataSource(data=dict(x=x.ravel(), y=y.ravel(), width=map.ravel(), bin=binid.ravel()))
 
     uncertainty = 1 / np.sqrt(ivar)
 
 
     std = np.std(map[np.isfinite(map)])
-    low = np.median(map[np.isfinite[map]]) - std
-    hi = np.median(map[np.isfinite[map]]) + std
+    low = np.median(map[np.isfinite(map)]) - std
+    hi = np.median(map[np.isfinite(map)]) + std
     color_mapper = LinearColorMapper(palette=palette, low=low, high=hi)
 
 
-    heatmap = bp.figure(title=map_keyword, tools="tap", plot_width=400, plot_height=400, 
+    heatmap = bp.figure(title=map_keyword, tools="tap", 
                         x_axis_label='Spaxel', y_axis_label='Spaxel')
-    heatmap.image(image=[map], x=0, y=0, dw=10, dh=10, palette=palette, color_mapper=color_mapper)
+    heatmap.image(image=[map], x=0, y=0, dw=10, dh=10, color_mapper=color_mapper)
     heatmap.circle('x', 'y', size=10, source=source, alpha=0)
 
 
@@ -31,30 +32,35 @@ def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keywor
     heatmap.add_layout(color_bar, 'right')
 
 
-    flux_plot = bp.figure(title="Flux", plot_width=400, plot_height=200, x_axis_label='Wavelength', 
+    flux_plot = bp.figure(title="Flux", x_axis_label='Wavelength', 
                           y_axis_label="Flux")
-    uncertainty_plot = bp.figure(title="Uncertainty", plot_width=400, plot_height=200, 
+    uncertainty_plot = bp.figure(title="Uncertainty", 
                                  x_axis_label="Wavelength")
-    model_plot = bp.figure(title="Stellar Model", plot_width=400, plot_height=200, 
+    model_plot = bp.figure(title="Stellar Model", 
                            x_axis_label="Wavelength")
 
     flux_source = ColumnDataSource(data=dict(x=[], y=[]))
     uncertainty_source = ColumnDataSource(data=dict(x=[], y=[]))
     model_source = ColumnDataSource(data=dict(x=[], y=[]))
 
-    flux_plot.step('x', 'y', source=flux_source, color='black', model='center')
+    flux_plot.step('x', 'y', source=flux_source, color='black', mode='center')
     uncertainty_plot.line('x', 'y', source=uncertainty_source, color='dimgrey')
     model_plot.line('x', 'y', source=model_source, color='red', line_dash='dashed')
 
+    bin_div = Div(text="<b>Bin:</b> ", width=200, height=30)
+
     callback = CustomJS(args=dict(source=source, flux_source=flux_source, uncertainty_source=uncertainty_source,
-                                  model_source=model_source, flux=flux, uncertainty=uncertainty,
+                                  model_source=model_source, bin_div=bin_div, flux=flux, uncertainty=uncertainty,
                                   model=model, wavelength=wavelength), code="""
                                   var indices = source.selected.indices;
                                   if (indices.length >0) {
                                     var index = indices[0]
                                     var x = source.data['x'][index];
                                     var y = source.data['y'][index];
+                                    var bin_value = source.data['bin'][index]
                                     
+                                    bin_div.text = "<b>Bin:</b> " + bin_value;
+
                                     var w_min = 5880;
                                     var w_max = 5910;
                                     var w_filtered = [];
@@ -64,8 +70,8 @@ def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keywor
                                     var m_filtered = [];
                                     
                                     for (var i = 0; i < wavelength.length; i++) {
-                                        if (wavelength[i] >= w_min && wavelength[i] <= w_max) {
-                                            w_filtered.push(wavelength[i]);
+                                        if (wavelength[i][y][x] >= w_min && wavelength[i][y][x] <= w_max) {
+                                            w_filtered.push(wavelength[i][y][x]);
                                             f_filtered.push(flux[i][y][x]);
                                             u_filtered.push(uncertainty[i][y][x]);
                                             m_filtered.push(model[i][y][x]);
@@ -90,3 +96,6 @@ def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keywor
     layout = column(heatmap, flux_plot, uncertainty_plot, model_plot)
     out_fname = os.path.join(output, f"{map_keyword}.html")
     output_file(out_fname)
+
+    save(heatmap)
+    print(f"BOKEH plot saved to {out_fname}")
