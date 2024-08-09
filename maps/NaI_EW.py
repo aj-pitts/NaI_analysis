@@ -137,7 +137,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     
     plt.hist(flatewcleaned,bins=int(nbins),color='k')
     plt.xlim(-5,5)
-    plt.xlabel(r'$\mathrm{EW_{Na\ I}\ (\AA)}$')
+    plt.xlabel(r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
     plt.ylabel(r'$N_{\mathrm{spax}}$')
     
     im2name = f"{args.galname}-EW_distribution.png"
@@ -156,7 +156,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
  
     plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=vmax,
            extent=[32.4, -32.6,-32.4, 32.6])
-    plt.colorbar(label=r'$\mathrm{EW_{Na\ I}\ (\AA)}$',fraction=0.0465, pad=0.01)
+    plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)
     plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\Delta \alpha$ (arcsec)')
     plt.ylabel(r'$\Delta \delta$ (arcsec)')
