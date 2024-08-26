@@ -96,7 +96,7 @@ def SFR_map(map_fil,redshift,figpath):
     plt.ylabel(r'$\delta$ (arcsec)')
     plt.colorbar(label=r"$\mathrm{SFR\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
     
-    imname = os.path.join(figpath,f"{args.galname}_SFR-map.png")
+    imname = os.path.join(figpath,f"{args.galname}_SFR-map.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"SFR map plot saved to {imname}")
     plt.close()
@@ -115,7 +115,7 @@ def SFR_map(map_fil,redshift,figpath):
     plt.ylabel(r'$\delta$ (arcsec)')
     plt.colorbar(label=r"$\mathrm{\Sigma_{SFR}\ (M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
     
-    imname = os.path.join(figpath,f"{args.galname}_SFR-density-map.png")
+    imname = os.path.join(figpath,f"{args.galname}_SFR-density-map.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"SFR surface density map plot saved to {imname}")
     plt.close()
@@ -130,7 +130,7 @@ def SFR_map(map_fil,redshift,figpath):
     plt.xlabel(r"$\mathrm{SFR\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$")
     plt.ylabel(r"$N_{\mathrm{bins}}$")
     plt.xlim(np.median(flatmap) - 7* np.std(flatmap), np.median(flatmap) + 7 * np.std(flatmap))
-    imname = os.path.join(figpath,f"{args.galname}_SFR-distribution.png")
+    imname = os.path.join(figpath,f"{args.galname}_SFR-distribution.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"SFR distribution plot saved to {imname}")
     plt.close()
@@ -142,6 +142,7 @@ def get_args():
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [.pdf/.png]", default = ".pdf")
     parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
 
     return parser.parse_args()
@@ -222,4 +223,8 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.imgftype == "pdf" or args.imgftype == "png":
+        pass
+    else:
+        raise ValueError(f"{args.imgftype} not a valid value for the output image filetype.\nAccepted formats [pdf/png]\nDefault: pdf")
     main(args)

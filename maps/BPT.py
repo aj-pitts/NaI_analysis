@@ -119,7 +119,8 @@ def BPT(map_fil, fig_output):
 
 
     fig.subplots_adjust(hspace=0,wspace=0)
-    imname = os.path.join(fig_output,f"{args.galname}_ELRs.png")
+    
+    imname = os.path.join(fig_output,f"{args.galname}_ELRs.{args.imgftype}")
     fig.savefig(imname,bbox_inches='tight',dpi=300)
     logging.info(f"ELRs Plot saved to {imname}")
     
@@ -180,7 +181,7 @@ def BPT(map_fil, fig_output):
         ax.text(x, y-shift, cat, fontsize='large', transform=ax.transAxes, bbox={'facecolor':color_hex[cat],'pad':5})
         shift += 0.075
 
-    imname = os.path.join(fig_output, f"{args.galname}_BPT-Classification.png")
+    imname = os.path.join(fig_output, f"{args.galname}_BPT-Classification.{args.imgftype}")
     fig.savefig(imname,bbox_inches='tight',dpi=300)
     logging.info(f"BPT classification Map plot saved to {imname}")
 
@@ -192,6 +193,7 @@ def get_args():
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [.pdf/.png]", default = ".pdf")
 
     return parser.parse_args()
 
@@ -248,4 +250,8 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.imgftype == "pdf" or args.imgftype == "png":
+        pass
+    else:
+        raise ValueError(f"{args.imgftype} not a valid value for the output image filetype.\nAccepted formats [pdf/png]\nDefault: pdf")
     main(args)

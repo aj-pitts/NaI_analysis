@@ -140,7 +140,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     plt.xlabel(r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
     plt.ylabel(r'$N_{\mathrm{spax}}$')
     
-    im2name = f"{args.galname}-EW_distribution.png"
+    im2name = f"{args.galname}-EW_distribution.{args.imgftype}"
     output = os.path.join(savepath,im2name)
     plt.savefig(output,bbox_inches='tight',dpi=150)
     logging.info(f"EW distriubtion plot saved to {output}")
@@ -161,7 +161,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     plt.xlabel(r'$\Delta \alpha$ (arcsec)')
     plt.ylabel(r'$\Delta \delta$ (arcsec)')
     
-    im1name = f"{args.galname}-EW_map.png"
+    im1name = f"{args.galname}-EW_map.{args.imgftype}"
     output = os.path.join(savepath,im1name)
     plt.savefig(output,bbox_inches='tight',dpi=200)
     logging.info(f"EW map plot saved to {output}")
@@ -185,6 +185,7 @@ def get_args():
     
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [.pdf/.png]", default = ".pdf")
     parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
     parser.add_argument('--bokeh', type=bool, help="Input [True/False] for creating a Bokeh interactive plot.", default = False)
     
@@ -284,4 +285,8 @@ def main(args):
     
 if __name__ == "__main__":
     args = get_args()
+    if args.imgftype == "pdf" or args.imgftype == "png":
+        pass
+    else:
+        raise ValueError(f"{args.imgftype} not a valid value for the output image filetype.\nAccepted formats [pdf/png]\nDefault: pdf")
     main(args)

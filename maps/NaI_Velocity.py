@@ -50,7 +50,7 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
     plt.ylabel(r'$\Delta \delta$ (arcsec)')
     plt.colorbar(label=r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$",fraction=0.0465, pad=0.01)
     
-    imname = os.path.join(figpath,f"{args.galname}_velocity-map.png")
+    imname = os.path.join(figpath,f"{args.galname}_velocity-map.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"Velocity map plot saved to {imname}")
     plt.close()
@@ -61,7 +61,7 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
     plt.hist(flat_vels,bins=int(nbins),color='k')
     plt.xlabel(r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$")
     plt.ylabel(r"$N_{\mathrm{bins}}$")
-    imname = os.path.join(figpath,f"{args.galname}_velocity-distribution.png")
+    imname = os.path.join(figpath,f"{args.galname}_velocity-distribution.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"Velocity distribution plot saved to {imname}")
     plt.close()
@@ -74,6 +74,7 @@ def get_args():
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [pdf/png]", default = "pdf")
 
     return parser.parse_args()
 
@@ -134,4 +135,8 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.imgftype == "pdf" or args.imgftype == "png":
+        pass
+    else:
+        raise ValueError(f"{args.imgftype} not a valid value for the output image filetype.\nAccepted formats [pdf/png]\nDefault: pdf")
     main(args)
