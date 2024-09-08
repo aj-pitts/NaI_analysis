@@ -1,31 +1,38 @@
 import os
 from glob import glob
+import argparse
 
 
-def main():
-    # input the galaxy name and binning key
-    galname = input("Enter Galaxy Name:\n")
+def get_args():
+    """
+    Command line input arguments.
 
-    ask = True
-    while ask:
-        binflag = input("Binkey SQUARE0.6? [Y/N]\n")
+    Returns:
+            :class:`argparse.Namespace`: Converts argument
+            strings to objects and assigns them as attributes to the class `Namespace`.
+    """
+    parser = argparse.ArgumentParser(description='File to run the MaNGA DAP on a MUSE cube.')
 
-        if binflag.lower() == 'y':
-            binkey = "SQUARE0.6"
-            ask = False
-        elif binflag.lower() == 'n':
-            binkey = input("Enter binkey:\n")
-            ask = False
-        else:
-            print('Invalid response.')
+    parser.add_argument('galname', type=str,help='input galaxy name.')
+
+    parser.add_argument('bin_key', type=str, help='input DAP spatial binning method.')
+
+    return parser.parse_args()
+
+
+
+def main(args):
+    galname = args.galname
+    binkey = args.bin_key
 
     # define remote directory of the data
-    remote_dir = f"{galname}-{binkey}/"
+    gal_dir = f"{galname}-{binkey}/"
+    inrainbows_dir = "/data2/muse/"
 
     # inrainbows paths to the mcmc and cube outputs
-    mcmc_path = os.path.join("NaImcmcIFU/muse/NaI_MCMC_output",remote_dir)
-    cube_path = os.path.join("mangadap_muse/outputs",remote_dir)
-    ini_path = os.path.join(f"mangadap_muse/MUSE_cubes/{galname}/*.ini")
+    mcmc_path = os.path.join(inrainbows_dir,"mcmc_outputs",gal_dir)
+    cube_path = os.path.join(inrainbows_dir,"dap_outputs",gal_dir)
+    ini_path = os.path.join(inrainbows_dir,"muse_cubes",f"{galname}/*.ini")
 
     # set up local paths
     local_path = os.path.dirname(os.path.abspath(__file__))
@@ -52,11 +59,15 @@ def main():
         if len(glob(f"{dir}/*")) > 0:
             print(f"WARNING: '{dir}' is not an empty directory\n")
 
+
     print("SCP COMMANDS:\n")
     print(f"scp -r apitts@inrainbows:{cube_path} {local_dir_cube}")
     print(f"scp -r apitts@inrainbows:{mcmc_path} {local_dir_mcmc}")
     print(f"scp -r 'apitts@inrainbows:{ini_path}' {local_dir_ini}")
     print("\n\n")
 
+
+
 if __name__ == "__main__":
-    main()
+    args = get_args()
+    main(args)

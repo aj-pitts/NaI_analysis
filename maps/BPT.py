@@ -117,6 +117,10 @@ def BPT(map_fil, fig_output):
     ax[2].set_xlim(np.min(oi_ha[np.isfinite(oi_ha)]),np.max(oi_ha[np.isfinite(oi_ha)]))
     ax[2].set_ylim(np.min(oiii_hb[np.isfinite(oiii_hb)]),np.max(oiii_hb[np.isfinite(oiii_hb)]))
 
+    fig.text(0.05, 0.9, "(a)", fontsize=15, transform = ax[0].transAxes)
+    fig.text(0.05, 0.9, "(b)", fontsize=15, transform = ax[1].transAxes)
+    fig.text(0.05, 0.9, "(c)", fontsize=15, transform = ax[2].transAxes)
+
 
     fig.subplots_adjust(hspace=0,wspace=0)
     
@@ -131,7 +135,7 @@ def BPT(map_fil, fig_output):
         'star-forming': np.array([119, 168, 212]), # blue
         'composite': np.array([235, 235, 240]), # white
         'seyfert': np.array([250, 209, 44]), # yellow
-        'liners': np.array([51, 54, 82]), # dark blue
+        'liners': np.array([255, 38, 91]), # light red
         'unk': np.array([0, 0, 0])
     }
 
@@ -139,7 +143,7 @@ def BPT(map_fil, fig_output):
         'Star-Forming': '#77a9d4', # blue
         'Composite': '#ebebf0', # white
         'Seyfert': '#fad12c', # yellow
-        'Liners': '#333652' # dark blue
+        'Liners': '#ff265b' # light red
     }
 
     classification_value = {
@@ -193,7 +197,7 @@ def get_args():
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
-    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [.pdf/.png]", default = ".pdf")
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [pdf/png]", default = "pdf")
 
     return parser.parse_args()
 

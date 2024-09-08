@@ -142,7 +142,7 @@ def get_args():
 
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
-    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [.pdf/.png]", default = ".pdf")
+    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [pdf/png]", default = "pdf")
     parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
 
     return parser.parse_args()
