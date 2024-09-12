@@ -14,7 +14,7 @@ def get_args():
 
 def main(args):
     ## setup local output dirs
-    local_abspath = "/Users/apitts4030/Repo/inrainbows_py/plot_inspect/"
+    local_abspath = "/Users/apitts4030/Repo/NaI_analysis/plot_inspect/"
     local_galaxy = os.path.join(local_abspath, f"{args.galname}-{args.bin_method}")
     if not os.path.exists(local_galaxy):
         os.mkdir(local_galaxy)
