@@ -6,17 +6,61 @@ from glob import glob
 import os
 import argparse
 from tqdm import tqdm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import warnings
 
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+def get_EW(datadir):
+    ewmap_path = glob(os.path.join(datadir, "**", "*EW-Map.fits"), recursive=True)
+    if len(ewmap_path) == 0:
+        raise ValueError(f"No EW map data found in {datadir}")
+    if len(ewmap_path) > 1:
+        print(ewmap_path)
+        raise ValueError(f"Multiple EW map .fits files found")
+    
+    data = fits.getdata(ewmap_path[0])
+    return data
 
-def make_vmap(mcmc_paths,cube_fil,figpath):
+def get_sn_cut(ew):
+    if ew <= 0.25:
+        sn_cut = 40
+    elif ew <= 0.5:
+        sn_cut = 20
+    elif ew <= 0.75:
+        sn_cut = 10
+    else:
+        sn_cut = 5
+
+    return sn_cut
+
+def NaD_snr(wave, flux, ivar):
+    windows = [(5865, 5875), (5915, 5925)]
+    inds1 = np.where((wave>=windows[0][0]) & (wave<=windows[0][1]))[0]
+    inds2 = np.where((wave>=windows[1][0]) & (wave<=windows[1][1]))[0]
+    inds = np.concatenate((inds1,inds2))
+    
+    flux_window = flux[inds]
+    ivar_window = ivar[inds]
+
+    sig = 1/np.sqrt(ivar_window)
+    w = np.logical_and(np.isfinite(sig), np.isfinite(flux_window))
+
+    return np.median(flux_window[w]/sig[w])
+
+
+def make_vmap(mapspath, mcmc_paths,cube_fil,figpath):
     cube = fits.open(cube_fil)
     binid = cube['BINID'].data[0]
-
+    flux = cube['FLUX'].data
+    ivar = cube['IVAR'].data
+    wave = cube['WAVE'].data
+    
     lamrest = 5897.558
+
+    ewmap = get_EW(mapspath)
 
     vel_map = np.zeros(binid.shape)
     table = None
@@ -32,23 +76,48 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
             continue
         table = join(table, data_table, join_type='outer')
     
+    badsnr = 0
+    badew = 0
     bins, inds = np.unique(table['bin'],return_index=True)
     for ID,ind in zip(bins,inds):
         w = binid == ID
+        indxs = np.where(binid == ID)
+
+        ew = np.median(ewmap[w])
+        if not np.isfinite(ew) or ew<=0:
+            badew+=1
+            continue
+
+        sn_cut = get_sn_cut(ew)
+        flux_bin = flux[:, indxs[0], indxs[1]]
+        ivar_bin = ivar[:, indxs[0], indxs[1]]
+        sn = NaD_snr(wave, flux_bin[:,0], ivar_bin[:,0])
+        if sn<sn_cut:
+            warnings.warn(f"NaD S/N in Bin {ID} is {sn}. Threshold is {sn_cut}")
+            badsnr+=1
+            continue
+
         vel_map[w] = table[ind]['velocities']
     
     logging.info('Creating plots.')
-    minmax = round(np.std(vel_map),ndigits=-1)
+    minmax = round(2 * np.std(vel_map),ndigits=-1)
     plotmap = np.copy(vel_map)
-    w = (plotmap<-minmax) | (plotmap>minmax)
-    plotmap[w] = np.nan
+    #w = (plotmap<-minmax) | (plotmap>minmax)
+    plotmap[(plotmap==0) | (plotmap==-999)] = np.nan
 
-    plt.imshow(plotmap,cmap='bwr',vmin=-minmax,vmax=minmax,origin='lower',
+    im = plt.imshow(plotmap,cmap='bwr',vmin=-minmax,vmax=minmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
     #plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\Delta \alpha$ (arcsec)')
     plt.ylabel(r'$\Delta \delta$ (arcsec)')
-    plt.colorbar(label=r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$",fraction=0.0465, pad=0.01)
+    
+    ax = plt.gca()
+    ax.set_facecolor('lightgray')
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = plt.colorbar(im,cax=cax,label=r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$")
+    #plt.colorbar(label=r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$",fraction=0.0465, pad=0.01)
     
     imname = os.path.join(figpath,f"{args.galname}_velocity-map.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
@@ -56,15 +125,31 @@ def make_vmap(mcmc_paths,cube_fil,figpath):
     plt.close()
 
     flat_vels = table['velocities']
+    badfitcount = np.sum(flat_vels==-999)
+    flat_vels = flat_vels[flat_vels!=-999]
     bin_width = 3.5 * np.std(flat_vels) / (flat_vels.size ** (1/3))
     nbins = (max(flat_vels) - min(flat_vels)) / bin_width
     plt.hist(flat_vels,bins=int(nbins),color='k')
     plt.xlabel(r"$v_{\mathrm{Na I}}\ (\mathrm{km\ s^{-1}})$")
     plt.ylabel(r"$N_{\mathrm{bins}}$")
+    plt.text(0.05,0.9,f"Removed: {badfitcount}", transform=plt.gca().transAxes)
+
     imname = os.path.join(figpath,f"{args.galname}_velocity-distribution.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"Velocity distribution plot saved to {imname}")
     plt.close()
+
+    cleanvel = vel_map[np.isfinite(vel_map) & (vel_map!=0) & (vel_map!=-999)]
+    logging.info(f"Velocity Map Info for {args.galname}")
+    print(f"V_max = {np.max(cleanvel)}")
+    print(f"V_med = {np.median(cleanvel)}")
+    print(f"V_min = {np.min(cleanvel)}")
+    print(f"sig_V = {np.std(cleanvel)}")
+    print("\n")
+    print(f"Bad EWs: {badew}")
+    print(f"Bad S/N {badsnr}")
+    print(f"Bad MCMC Fits {badfitcount}")
+    logging.info("Done.")
 
     return vel_map
 
@@ -119,7 +204,7 @@ def main(args):
     
     
     # call the fn
-    vmap = make_vmap(mcmc_fils,cube_fil,fig_output_path)
+    vmap = make_vmap(map_output_path,mcmc_fils,cube_fil,fig_output_path)
 
     # write the data
     map_output_fil = os.path.join(map_output_path,f"{args.galname}_Velocity-map.fits")

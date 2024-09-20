@@ -9,6 +9,7 @@ from tqdm import tqdm
 import sys
 import logging
 import warnings
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -45,8 +46,8 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     ewmap = np.zeros((ny,nx))
     wavecube = np.zeros(flux.shape)
 
-    logging.info('Constructing equivalent width map.')
-    for ID in uniqids[1:]:
+    #logging.info('Constructing equivalent width map.')
+    for ID in tqdm(uniqids[1:], desc="Constructing equivalent width map."):
         inds = np.where(binid == ID)
         w = binid == ID
 
@@ -107,9 +108,9 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
         M = modelbin[:,0]
         
         if not all(F>=0) or not all(M>=0):
-            if show_warnings:
-                warnings.warn(f"Flux or model arrays in Bin {ID} contain values < 0. Logging Bin ID.", UserWarning,
-                             stacklevel=2)
+            #if show_warnings:
+                #warnings.warn(f"Flux or model arrays in Bin {ID} contain values < 0. Logging Bin ID.", UserWarning,
+                             #stacklevel=2)
             #ewmap[w] = np.nan
             if bad_bins:
                 bbins.append(ID)
@@ -121,7 +122,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
         dLam = np.insert(dLam, 0, dLam[0])
         
         # exclude models equal to zero to avoid nan in calculation
-        nonzero = (M != 0) & (F != 0)
+        nonzero = (M > 0) & (F > 0)
         cont = np.ones(np.sum(nonzero))
         W = np.sum( (cont - (F[nonzero])/M[nonzero]) * dLam[nonzero] )
         ewmap[w] = W
@@ -148,18 +149,22 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     
     
     plotmap = np.copy(ewmap)
-    plotmap[(plotmap==0) | (plotmap>vmax) | (plotmap<vmin)] = np.nan
+    plotmap[(plotmap==0) | (plotmap<vmin)] = np.nan
     
-    nvmax = np.median(plotmap[np.isfinite(plotmap)]) + np.std(plotmap[np.isfinite(plotmap)])
-    if vmax < nvmax:
-        vmax = np.round(nvmax)
- 
-    plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=vmax,
+    nvmax = round(np.median(plotmap[np.isfinite(plotmap)]) + 3 * np.std(plotmap[np.isfinite(plotmap)]),1)
+
+    im = plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=nvmax,
            extent=[32.4, -32.6,-32.4, 32.6])
-    plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)
-    plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\Delta \alpha$ (arcsec)')
     plt.ylabel(r'$\Delta \delta$ (arcsec)')
+    
+    ax = plt.gca()
+    ax.set_facecolor('lightgray')
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = plt.colorbar(im,cax=cax,label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
+    #plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)    
     
     im1name = f"{args.galname}-EW_map.{args.imgftype}"
     output = os.path.join(savepath,im1name)
@@ -175,7 +180,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
 
     if bad_bins:
         return ewmap, bbins
-    
+
     return ewmap
 
 
@@ -280,6 +285,15 @@ def main(args):
     hdul = fits.HDUList([hdu,hdu2])
     hdul.writeto(savefits,overwrite=True)
     logging.info('Done.')
+
+    cleanmap = W_equiv[np.isfinite(W_equiv)]
+    logging.info(f"{args.galname} EW Info:")
+    print(f"Max = {np.max(cleanmap)}")
+    print(f"Med = {np.median(cleanmap)}")
+    print(f"Min = {np.min(cleanmap)}")
+    print(f"Std = {np.std(cleanmap)}")
+    print(f"Finite Values: {cleanmap.size}")
+    logging.info("Done.")
 
     
     

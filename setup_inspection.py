@@ -20,6 +20,9 @@ def main(args):
         os.mkdir(local_galaxy)
         print(f"Making directory {local_galaxy}")
 
+    else:
+        print(f"Directory exists {local_galaxy}")
+
     local_qa = os.path.join(local_galaxy, "qa")
     local_beta = os.path.join(local_galaxy, "beta_plots")
     local_ewmap = os.path.join(local_galaxy, "ew_map")
@@ -28,6 +31,8 @@ def main(args):
         if not os.path.exists(path):
             os.mkdir(path)
             print(f"Making directory {path}")
+        else:
+            print(f"Directory exists {path}")
 
 if __name__ == "__main__":
     args = get_args()

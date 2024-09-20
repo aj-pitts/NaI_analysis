@@ -10,6 +10,8 @@ import sys
 import astropy.units as u
 import warnings
 import configparser
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from astropy.coordinates import Angle
 
 import logging
 logger = logging.getLogger()
@@ -72,43 +74,60 @@ def SFR_map(map_fil,redshift,figpath):
         sv = np.median(stellar_vel[w])
         z = ((sv * (1+redshift))/c.value + redshift)
         D = (c * z / H0)
-
+        theta = Angle(0.2, unit='arcsec')
+        s = D * theta.radian
+        
         luminosity = 4 * np.pi * (D.to(u.cm).value)**2 * ha_flux * 1e-17
         SFR = np.log10(luminosity) - 41.27
-        sigma_SFR = SFR / ((0.2 * (D.to(u.kpc).value)))**2
+
+        if s.to(u.pc).value > 300:
+            continue
+        sigma_SFR = np.log10( (10**SFR) / ((s.to(u.kpc).value)**2) )
 
         sfrmap[w] = SFR
         sfrdensitymap[w] = sigma_SFR
 
+
+    ### SFR Map
     logging.info("Creating plots.")
-    w = np.isfinite(sfrmap)
+    w = np.isfinite(sfrmap) & (sfrmap!=0)
     vmin = int(np.median(sfrmap[w]) - np.std(sfrmap[w]))
     vmax = int(np.median(sfrmap[w]) + np.std(sfrmap[w]))
     plotmap = np.copy(sfrmap)
 
-    w = (plotmap<vmin) | (plotmap>vmax)
-    plotmap[w] = np.nan
+    #w = (plotmap<vmin) | (plotmap>vmax)
+    #plotmap[w] = np.nan
+    plotmap[plotmap==0] = np.nan
 
-    plt.imshow(plotmap,cmap='rainbow',vmin=vmin,vmax=vmax,origin='lower',
+    im = plt.imshow(plotmap,cmap='rainbow',vmin=vmin,vmax=vmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
-    plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\alpha$ (arcsec)')
     plt.ylabel(r'$\delta$ (arcsec)')
-    plt.colorbar(label=r"$\mathrm{SFR\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
+    ax = plt.gca()
+    ax.set_facecolor('lightgray')
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = plt.colorbar(im,cax=cax,label=r"$\mathrm{log\ SFR_{H\alpha}\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$")
+    #plt.colorbar(label=r"$\mathrm{SFR\ (M_{\odot}\ yr^{-1}\ spaxel^{-1})}$",fraction=0.0465, pad=0.01)
     
     imname = os.path.join(figpath,f"{args.galname}_SFR-map.{args.imgftype}")
     plt.savefig(imname,bbox_inches='tight',dpi=200)
     logging.info(f"SFR map plot saved to {imname}")
     plt.close()
 
-    #vmin = int(np.median(sfrdensitymap) - 4 * np.std(sfrdensitymap))
-    #vmax = int(np.median(sfrdensitymap) + 4 * np.std(sfrdensitymap))
+
+    ### SFR Density
+    w = np.isfinite(sfrdensitymap) & (sfrdensitymap != 0)
+    vmin = int(np.median(sfrdensitymap[w]) - 2 * np.std(sfrdensitymap[w]))
+    vmax = int(np.median(sfrdensitymap[w]) + 2 * np.std(sfrdensitymap[w]))
     plotmap = np.copy(sfrdensitymap)
 
     #w = (plotmap<vmin) | (plotmap>vmax)
     #plotmap[w] = np.nan
+    plotmap[plotmap==0] = np.nan
 
-    plt.imshow(plotmap,cmap='rainbow',origin='lower',
+    plt.imshow(plotmap,cmap='rainbow',origin='lower',vmin=vmin,vmax=vmax,
                extent=[32.4, -32.6,-32.4, 32.6])
     plt.gca().set_facecolor('lightgray')
     plt.xlabel(r'$\alpha$ (arcsec)')
@@ -120,6 +139,8 @@ def SFR_map(map_fil,redshift,figpath):
     logging.info(f"SFR surface density map plot saved to {imname}")
     plt.close()
 
+
+    ### SFR Hist
     w = np.isfinite(sfrmap)
     finite_map = sfrmap[w]
     flatmap = finite_map.flatten()
