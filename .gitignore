@@ -1,3 +1,5 @@
 data/
 .DS Store
 paper/dat/
+paper/paper-plots
+plot_inspect/
