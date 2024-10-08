@@ -3,3 +3,6 @@ data/
 paper/dat/
 paper/paper-plots
 plot_inspect/
+.ipynb_checkpoints
+*~
+\#*#
