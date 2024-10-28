@@ -6,131 +6,154 @@ import configparser
 import os
 from glob import glob
 from tqdm import tqdm
-import sys
 import logging
 import warnings
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../modules/")))
-from util import clean_ini_file
-from interactive_plot import make_bokeh_map
+from modules.util import clean_ini_file, check_filepath
+from modules.interactive_plot import make_bokeh_map
 
 
-def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,show_warnings=True):
-    c = 2.998e5
+def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=False):
+
+    ## initialize values
+    c = 2.998e5 #speed of light km/s
     
+    ## check if the redshift from the config file is in string format
     if isinstance(z_guess, str):
         z_guess = float(z_guess)
         
-    if bad_bins:
-        bbins=[]
-        
+    ## init the data
     cube = fits.open(cubefil)
-    Map = fits.open(mapfil)
+    maps = fits.open(mapfil)
     
     flux = cube['FLUX'].data
-    wave = cube['WAVE'].data
     ivar = cube['IVAR'].data
+    mask = cube['MASK'].data.astype(bool)
+
+    wave = cube['WAVE'].data
+
     model = cube['MODEL'].data
+    model_mask = cube['MODEL_MASK'].data
     
-    stellarvel = Map['STELLAR_VEL'].data
-    binid = Map['BINID'].data[0]
-    uniqids = np.unique(binid)
+    stellarvel = maps['STELLAR_VEL'].data
+    stellarvel_mask = maps['STELLAR_VEL_MASK'].data.astype(bool)
+    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
+
+    binids = maps['BINID'].data ## 0: stacked spectra, 1: stellar-continuum results, 2: empty, 3: emline model results, 4: empty
+
+    spatial_bins = binids[0]
+    stellar_model_results = binids[1]
+    emline_model_results = binids[3]
     
+    uniqids = np.unique(spatial_bins[0])
+    
+
+    ## define the Na D window bounds
     region = 5880, 5910
     
-    
+    ## init empty arrays to write measurements to
     l, ny, nx = flux.shape
-    ewmap = np.zeros((ny,nx))
+    ewmap, ewmap_unc, ewmap_mask = np.zeros((ny,nx))
     wavecube = np.zeros(flux.shape)
 
-    #logging.info('Constructing equivalent width map.')
+    badbins = {
+        'Model Results':[],
+        'Stellar Vel Mask':[],
+        'Stellar Vel':[],
+        'Infinite EW':[],
+        'Infinite EW_err':[]
+    }
+
     for ID in tqdm(uniqids[1:], desc="Constructing equivalent width map."):
-        inds = np.where(binid == ID)
-        w = binid == ID
+        mask_EW = False
+        w = spatial_bins == ID
+        y, x = np.where(w)
+
+        ## if bad stellar model or emline fits, skip the spaxel
+        if stellar_model_results[w][0] < 0 or emline_model_results[w][0] < 0:
+            badbins['Model Results'].append(ID)
+            mask_EW = True
+            
+        ## if stellar kinematics are masked, skip the spaxel
+        if not stellarvel_mask[w][0]:
+            badbins['Stellar Vel Mask'].append(ID)
+            mask_EW = True
 
         ## get the stellar velocity of the bin
         sv = stellarvel[w][0]
-            
+        sv_sigma = 1/np.sqrt(stellarvel_ivar[w][0])
+
+        if abs(sv) > 5 * np.std(stellarvel) + np.median(stellarvel):
+            badbins['Stellar Vel'].append(ID)
+            mask_EW = True
+
         ## Calculate redshift
         z = (sv * (1+z_guess))/c + z_guess
+        z_sigma = (sv_sigma/c) * (1 + z_guess)
 
         # shift wavelengths to restframe
         restwave = wave / (1+z)
+        restwave_sigma = wave * z_sigma / (1 + z)**2
 
-        for y,x in zip(inds[0],inds[1]):
-            wavecube[np.arange(len(restwave)),y,x] = restwave
+        if bokeh:
+            for y,x in zip(inds[0],inds[1]):
+                wavecube[np.arange(len(restwave)),y,x] = restwave
 
-        # define wavelength boundaries and slice flux, model, and wavelength arrays
-        inbounds = np.where((restwave>region[0]) & (restwave<region[1]))[0]
-        Lam = restwave[inbounds]
-        fluxbound = flux[inbounds,:,:]
-        modelbound = model[inbounds,:,:]       
 
-        ## check the flux and model in the bin
+        # define wavelength boundaries and store a slice object to slice the datacubes
+        NaD_window = (restwave>region[0]) & (restwave<region[1])
+        NaD_window_inds = np.where(NaD_window)[0]
+        slice_inds = (NaD_window_inds[:, None], y, x)
+
+        # slice wavelength and uncertainty arrays to NaD window
+        wave_window = restwave[NaD_window_inds]
+        wave_window_sigma = restwave_sigma[NaD_window_inds]
+
+        # slice flux and model datacubes to wavelength window and bin
+        # take one array from each bin
+        flux_sliced = flux[slice_inds][0]
+        ivar_sliced = ivar[slice_inds][0]
+        flux_sigma_sliced = 1 / np.sqrt(ivar_sliced)
+        mask_sliced = mask[slice_inds][0]
+
+        model_sliced = model[slice_inds][0]
+        model_mask_sliced = model_mask[slice_inds][0]
+
+
+        ## compute equivalent width
+        cont = np.ones(len(flux_sliced)) # normalized continuum
+        dlam = np.diff(wave_window) # Delta lambda
+        dlam_sigma = np.hypot(wave_window_sigma[:-1], wave_window_sigma[1:]) # Delta lambda uncertainty
+
+        W_mask = np.logical_or(mask_sliced.astype(bool), model_mask_sliced.astype(bool)) # combined flux and model masks
         
-        # slice the flux/model to just those in the current bin
-        fluxbin = fluxbound[:,inds[0],inds[1]]
-        modelbin = modelbound[:,inds[0],inds[1]]
+        W = np.sum(( (cont - flux_sliced / model_sliced ) * dlam)[W_mask]) # Equivalent wdith
 
-        if abs(sv) > 4 * np.std(stellarvel):
-            if show_warnings:
-                warnings.warn(f"Stellar velocity in Bin ID {ID} beyond 4 standard deviations. Bin {ID} EW set to Nan",UserWarning,
-                             stacklevel=2)
-            ewmap[w] = np.nan
-            if bad_bins:
-                bbins.append(ID)
-            continue
+        W_sigma = np.sqrt( np.sum( ((dlam * flux_sigma_sliced/model_sliced)**2 + ((cont - flux_sliced/model_sliced) * dlam_sigma)**2)[W_mask] ) ) # EW uncertainty
 
-        # make sure flux is identical throughout the bin
-        if not np.all(fluxbin == fluxbin[:,0][:,np.newaxis]):
-            if show_warnings:
-                warnings.warn(f"Fluxes in Bin {ID} are not identical. Bin {ID} EW set to NaN",UserWarning,
-                             stacklevel=2)
-            ewmap[w] = np.nan
-            if bad_bins:
-                bbins.append(ID)
+        if not np.isfinite(W):
+            badbins['Infinite W'].append(ID)
+            ewmap[w] = -999
             continue
-            
-        # repeat comparison for the model
-        if not np.all(modelbin == modelbin[:,0][:,np.newaxis]):
-            if show_warnings:
-                warnings.warn(f"Stellar models in Bin {ID} not identical. Bin {ID} EW set to NaN",UserWarning,
-                             stacklevel=2)
-            ewmap[w] = np.nan
-            if bad_bins:
-                bbins.append(ID)
+        
+        if not np.isfinite(W_sigma):
+            badbins['Infinite EW_err'].append(ID)
+            ewmap_unc[w] = -999
             continue
-         
-        F = fluxbin[:,0]
-        M = modelbin[:,0]
         
-        if not all(F>=0) or not all(M>=0):
-            #if show_warnings:
-                #warnings.warn(f"Flux or model arrays in Bin {ID} contain values < 0. Logging Bin ID.", UserWarning,
-                             #stacklevel=2)
-            #ewmap[w] = np.nan
-            if bad_bins:
-                bbins.append(ID)
-            #continue
-            
-            
-        # create dlambda array
-        dLam = np.diff(Lam)
-        dLam = np.insert(dLam, 0, dLam[0])
-        
-        # exclude models equal to zero to avoid nan in calculation
-        nonzero = (M > 0) & (F > 0)
-        cont = np.ones(np.sum(nonzero))
-        W = np.sum( (cont - (F[nonzero])/M[nonzero]) * dLam[nonzero] )
         ewmap[w] = W
-    
-    logging.info('Creating plots.')
-    
+        ewmap_unc[w] = W_sigma
+
+        if not mask_EW:
+            ewmap_mask[w] = 1
+
+
+    logging.info('Creating plots...')
     flatew = ewmap.flatten()
-    w = (flatew != 0) & (np.isfinite(flatew))
+    w = (flatew != 0) & (flatew != -999.0)
     flatewcleaned = flatew[w]
     
     bin_width = 3.5 * np.std(flatewcleaned) / (flatewcleaned.size ** (1/3))
@@ -172,19 +195,45 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,vmax=4,bad_bins=False,
     logging.info(f"EW map plot saved to {output}")
     plt.close()
     
+
+
+    plotmap = np.copy(ewmap)
+    w = plotmap != -999.0
+    med = np.median(plotmap[w])
+    std = np.std(plotmap[w])
+
+    nvmin = med - 4 * std
+    nvmax = med + 4 * std
+
+    im = plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=nvmin,vmax=nvmax,
+           extent=[32.4, -32.6,-32.4, 32.6])
+    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+    plt.ylabel(r'$\Delta \delta$ (arcsec)')
+    
+    ax = plt.gca()
+    ax.set_facecolor('lightgray')
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = plt.colorbar(im,cax=cax,label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
+    #plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)    
+    
+    im1name = f"{args.galname}-EW_map_db.{args.imgftype}"
+    output = os.path.join(savepath,im1name)
+    plt.savefig(output,bbox_inches='tight',dpi=200)
+    logging.info(f"EW map plot saved to {output}")
+    plt.close()
+
     if args.bokeh:
         logging.info("Creating BOKEH plot.")
         keyword = f"{args.galname}-EW-bokeh"
-        make_bokeh_map(flux, model, ivar, wavecube, ewmap, binid, savepath, keyword)
+        make_bokeh_map(flux, model, ivar, wavecube, ewmap, spatial_bins, savepath, keyword)
 
-
-    if bad_bins:
-        return ewmap, bbins
-
-    return ewmap
+    return ewmap, ewmap_mask, ewmap_unc, badbins
 
 
 def get_args():
+
     
     parser = argparse.ArgumentParser(description="A script to create an equivalent width map of ISM Na I for beta-corrected DAP outputs.")
     
@@ -206,16 +255,17 @@ def main(args):
     data_dir = os.path.join(script_dir, "data")
 
     ## Path to the specific galaxy and binning method input
-    cube_dir = f"{args.galname}"
-    cubepath_bc = os.path.join(data_dir,cube_dir,"cube",f"{args.galname}-{args.bin_method}")
+    cube_dir = os.path.join(data_dir, "dap_outputs" ,f"{args.galname}-{args.bin_method}")
+    cube_dir_bc = os.path.join(cube_dir,"BETA_CORR")
+    check_filepath(cube_dir_bc, mkdir=False)
     
     ## Path to save the plots
-    savepath = os.path.join(script_dir,"figures",'EW-Map')
+    savepath = os.path.join(script_dir,"figures",'EW_map')
     if not os.path.exists(savepath):
         os.makedirs(savepath)
     
     ## All fits files within cube path
-    fils = glob(os.path.join(cubepath_bc,"BETA-CORR",'**','*.fits'),recursive=True)
+    fils = glob(os.path.join(cube_dir_bc,'**','*.fits'),recursive=True)
     
     ## Finds the logcube and map files from the DAP output
     cubefil = None
@@ -227,9 +277,9 @@ def main(args):
             mapfil = fil
     
     if cubefil is None:
-        raise ValueError(f'Cube File not found in {cubepath_bc}')
+        raise ValueError(f'Cube File not found in {cube_dir_bc}')
     if mapfil is None:
-        raise ValueError(f'Map File not found in {cubepath_bc}')
+        raise ValueError(f'maps File not found in {cube_dir_bc}')
     
     
     redshift = args.redshift
@@ -265,37 +315,45 @@ def main(args):
         print(f"Redshift z={redshift} found in {config_fil}.")
     
 
-    W_equiv,bins = make_EW_map(cubefil,mapfil,redshift,savepath,bad_bins=True)
+    EW, EW_sigma, EW_mask, bbins = make_EW_map(cubefil,mapfil,redshift,savepath)
     
     mapspath = os.path.join(data_dir,cube_dir,"maps")
     if not os.path.exists(mapspath):
         os.mkdir(mapspath)
 
-    savefits = os.path.join(mapspath,f"{cube_dir}_EW-Map.fits")
+    savefits = os.path.join(mapspath,f"{cube_dir}_EW-maps.fits")
 
-    logging.info(f"Writing EW Map data to {savefits}")
+    logging.info(f"Writing data...")
+    primary = fits.PrimaryHDU()
+
+    hdu1 = fits.ImageHDU(EW, name="EW")
+    hdu1.header['DESC'] = "ISM Na I equivalent width map"
+    hdu1.header['UNITS'] = "Angstrom"
     
-    hdu = fits.PrimaryHDU(W_equiv)
-    hdu.header['DESC'] = "ISM Na I equivalent width map"
-    hdu.header['UNITS'] = "Angstrom"
-    
-    hdu2 = fits.ImageHDU(bins)
-    hdu2.header['DESC'] = "DAP spatial bin IDs for bad bins"
-    
-    hdul = fits.HDUList([hdu,hdu2])
+    hdu2 = fits.ImageHDU(EW_sigma, name="EW_SIGMA")
+    hdu2.header['DESC'] = "Propagated error on the EW"
+    hdu2.header['UNITS'] = "Angstrom"
+
+    hdu3 = fits.ImageHDU(EW_mask, name="EW_MASK")
+    hdu3.header['DESC'] = "Mask where EW values should be ignored"
+
+    cols = []
+    for key,values in bbins.items():
+        cols.append(fits.Column(name=key, format='J', array = values))
+
+    tablehdu = fits.BinTableHDU.from_columns(cols, name="BIN_IGNORES")
+    tablehdu.header['DESC'] = "Spatial bin IDs of masked bins"
+
+    hdul = fits.HDUList([primary,hdu1,hdu2,hdu3,tablehdu])
     hdul.writeto(savefits,overwrite=True)
-    logging.info('Done.')
+    logging.info(f'Equivalent Width data written to {savefits}')
 
-    cleanmap = W_equiv[np.isfinite(W_equiv)]
-    logging.info(f"{args.galname} EW Info:")
-    print(f"Max = {np.max(cleanmap)}")
-    print(f"Med = {np.median(cleanmap)}")
-    print(f"Min = {np.min(cleanmap)}")
-    print(f"Std = {np.std(cleanmap)}")
-    print(f"Finite Values: {cleanmap.size}")
-    logging.info("Done.")
-
-    
+    logging.info(f"EW for {args.galname} finished with the following rejections:")
+    keys = list(bbins.keys())
+    print(f"Poor stellar continuum/emline fits: {len(bbins[keys[0]])} bins.")
+    print(f"Poor stellar kinematic fits: {len(bbins[keys[1]])} bins.")
+    print(f"Stellar velocity > 4 sigma: {len(bbins[keys[2]])} bins.")
+    print(f"Non finite EW: {bbins[keys[3]]} bins.")
     
 if __name__ == "__main__":
     args = get_args()
