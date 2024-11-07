@@ -1,0 +1,30 @@
+font.family : stixgeneral
+mathtext.fontset : stix
+
+axes.linewidth : 1.8
+figure.figsize : 6, 6
+axes.labelsize : 20
+lines.linewidth : 2
+
+ytick.minor.visible : True
+ytick.direction : in
+ytick.major.width : 1.6
+ytick.major.size : 6
+ytick.minor.width : 1
+ytick.minor.size : 3
+ytick.right : True
+ytick.major.right : True
+ytick.minor.right : True
+ytick.labelsize : 15
+
+xtick.minor.visible : True
+xtick.direction : in
+xtick.major.width : 1.6
+xtick.major.size : 6
+xtick.minor.width : 1
+xtick.minor.size : 3
+xtick.top : True
+xtick.major.top : True
+xtick.minor.top : True
+xtick.labelsize : 15
+
