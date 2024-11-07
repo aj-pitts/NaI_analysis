@@ -122,6 +122,57 @@ def init_datapaths(galname, bin_method, verbose=False):
 
 
 def standard_header_dict(galname, HDU_keyword, unit_str, flag):
+    """
+    Creates a standard header dictionary for FITS file extensions based on the given flag.
+
+    Parameters
+    ----------
+    galname : str
+        The name of the galaxy associated with the data.
+    HDU_keyword : str
+        The base keyword related to the HDU (Header Data Unit) for the extension.
+    unit_str : str
+        The string representing the units for the pixel values (e.g., "Jy/beam").
+    flag : str
+        The type of data for which the header is being generated. Valid values are:
+        - "data" : Standard data header for the map.
+        - "err"  : Header for the error/uncertainty data.
+        - "mask" : Header for the mask data.
+        - "qual" : Header for the quality flags data.
+
+    Returns
+    -------
+    dict
+        A dictionary containing standard header entries for the corresponding data type.
+        The keys are header keywords, and the values are tuples containing the associated 
+        values and descriptions.
+
+    Notes
+    -----
+    The structure of the returned dictionary depends on the value of the `flag` parameter:
+
+    - **For "data"**: 
+      Includes fields like "DESC", "BUNIT", "ERRDATA", "QUALDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
+    
+    - **For "err"**:
+      Includes fields like "BUNIT", "DATA", "QUALDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
+    
+    - **For "mask"**:
+      Includes fields like "ERRDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
+    
+    - **For "qual"**:
+      Includes quality flag descriptions ("FLG_1", "FLG_0", etc.), "ERRDATA", "QUALDATA", "EXTNAME", and "AUTHOR".
+
+    The function assigns appropriate extension names, data descriptions, and associated metadata 
+    based on the type of data (`flag`).
+
+    Example
+    -------
+    >>> header = standard_header_dict("NGC_1234", "H_ALPHA", "Jy/beam", "data")
+    >>> print(header["DESC"])
+    ("NGC_1234 h alpha map", "")
+    """
+
     if flag == "data":
         header = {
             "DESC":(f"{galname} {HDU_keyword.lower().replace("_"," ")} map",""),
@@ -170,9 +221,47 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
 
 def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
     """
+    Creates a standardized dictionary mapping for the given galaxy name and HDU keyword.
+
+    Parameters
+    ----------
+    galname : str
+        The name of the galaxy for which the mapping is being generated.
+    HDU_keyword : str
+        The base keyword to be used for creating HDU-related keys in the dictionary.
+    unit_str : str
+        The unit string to be used in the header information.
+    mapdict : dict
+        A dictionary containing the map data with each key corresponding to a different data array.
+
+    Returns
+    -------
+    dict
+        A dictionary containing standardized mappings for the galaxy's data. The dictionary has
+        the following structure:
+        
+        - Keys are based on the provided `HDU_keyword` and include additional suffixes for 
+          mask, error, and flag data.
+        - Values are tuples containing the data from `mapdict` and the corresponding header dictionary 
+          generated using `standard_header_dict`.
+
+    Notes
+    -----
+    The function constructs a dictionary of the following form:
     
-    
+    - `<HDU_keyword>` : tuple of (data, header_dict)
+    - `<HDU_keyword>_MASK` : tuple of (mask_data, header_dict)
+    - `<HDU_keyword>_ERROR` : tuple of (error_data, header_dict)
+    - `<HDU_keyword>_FLAG` : tuple of (flag_data, header_dict)
+
+    The header dictionary is created using the `standard_header_dict` function, which includes the
+    galaxy name, HDU keyword, unit string, and a specific flag for each type of data.
+
+    **Important**: The `mapdict` must be ordered correctly, as the order of the values in `mapdict` 
+    directly determines the keys of the output dictionary. If the order is incorrect, the corresponding 
+    data may not be correctly associated with the intended keys.
     """
+    
     standard_dict = {}
     keywords = [HDU_keyword, f"{HDU_keyword}_MASK", f"{HDU_keyword}_ERROR", f"{HDU_keyword}_FLAG"]
     flags = ["data","mask","err","qual"]
