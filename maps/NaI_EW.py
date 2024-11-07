@@ -1,22 +1,88 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from astropy.io import fits
 import argparse
 import configparser
 import os
-from glob import glob
 from tqdm import tqdm
-import logging
-import warnings
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-from modules.util import clean_ini_file, check_filepath
-from modules.interactive_plot import make_bokeh_map
+from ..modules import defaults, util, file_handler, plotter
 
 
-def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=False):
+def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
+    """
+    Measure the equivalent width (EW) of spectral features in a 3D data cube.
+
+    This function calculates the equivalent width (EW) of spectral features in a
+    data cube file and generates corresponding maps. The analysis is based on an
+    estimated redshift (`z_guess`) and outputs the results to a specified location.
+    Optional visualizations of the results can be generated using Bokeh.
+
+    Parameters
+    ----------
+    cubefil : str
+        Path to the LOGCUBE FITS file from the DAP output.
+        
+    mapfil : str
+        Path to the MAPS FITS file containing additional maps from the DAP.
+        
+    z_guess : float
+        Estimated redshift of the source, used to calculate the sysetmaic rest-frame
+        wavelength.
+        
+    verbose : bool, optional
+        If `True`, prints detailed progress messages to the console. Useful for
+        debugging or tracking the analysis progress. Default is `False`.
+        
+    bokeh : bool, optional
+        If `True`, generates an interactive visualization of the EW maps using
+        Bokeh. Default is `False`.
+
+    Returns
+    -------
+    results : dict
+        A dictionary containing the calculated EW values and any relevant metadata.
+        Key contents may include:
+        
+        - 'EW_map' : 2D numpy.ndarray
+            Array of calculated equivalent widths mapped to spatial locations.
+            
+        - 'error_map' : 2D numpy.ndarray
+            Array of uncertainties associated with the equivalent width measurements.
+            
+        - 'other_results' : dict
+            Additional results or parameters, such as fitting statistics or
+            derived parameters, if applicable.
+
+    Raises
+    ------
+    FileNotFoundError
+        If either `cubefil` or `mapfil` cannot be found or opened.
+        
+    ValueError
+        If `z_guess` is outside of an expected range or if input data is
+        incompatible.
+
+    Notes
+    -----
+    - This function assumes the spectral data is in a 3D data cube format with
+      axes representing spatial dimensions and wavelength.
+    - The redshift guess (`z_guess`) is crucial for aligning observed features
+      with their rest-frame wavelengths.
+    - Requires `astropy` for FITS file handling and optional dependencies if Bokeh
+      visualization is enabled.
+
+    Examples
+    --------
+    Calculate EW and save results to a specific directory with verbose output:
+
+    >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03, savepath="results/",
+    ...            verbose=True)
+
+    Generate an interactive Bokeh plot:
+
+    >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03, bokeh=True)
+    
+    """
+    logger = util.verbose_logger(verbose)
 
     ## initialize values
     c = 2.998e5 #speed of light km/s
@@ -45,10 +111,7 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=Fa
     binids = maps['BINID'].data ## 0: stacked spectra, 1: stellar-continuum results, 2: empty, 3: emline model results, 4: empty
 
     spatial_bins = binids[0]
-    stellar_model_results = binids[1]
-    emline_model_results = binids[3]
-    
-    uniqids = np.unique(spatial_bins[0])
+    uniqids = np.unique(spatial_bins)
     
 
     ## define the Na D window bounds
@@ -56,39 +119,23 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=Fa
     
     ## init empty arrays to write measurements to
     l, ny, nx = flux.shape
-    ewmap, ewmap_unc, ewmap_mask = np.zeros((ny,nx))
+    ewmap, ewmap_unc = np.zeros((ny,nx)) -999.0
+    ewmap_qualflag, ewmap_mask = np.ones((ny,nx))
     wavecube = np.zeros(flux.shape)
 
-    badbins = {
-        'Model Results':[],
-        'Stellar Vel Mask':[],
-        'Stellar Vel':[],
-        'Infinite EW':[],
-        'Infinite EW_err':[]
-    }
-
     for ID in tqdm(uniqids[1:], desc="Constructing equivalent width map."):
-        mask_EW = False
         w = spatial_bins == ID
         y, x = np.where(w)
 
-        ## if bad stellar model or emline fits, skip the spaxel
-        if stellar_model_results[w][0] < 0 or emline_model_results[w][0] < 0:
-            badbins['Model Results'].append(ID)
-            mask_EW = True
-            
-        ## if stellar kinematics are masked, skip the spaxel
-        if not stellarvel_mask[w][0]:
-            badbins['Stellar Vel Mask'].append(ID)
-            mask_EW = True
+        bin_check = util.check_bin_ID(ID, binids, stellarvel, stellarvel_mask)
+        ewmap_qualflag[w] = bin_check
+
+        if bin_check != 1:
+            ewmap_mask[w] = 0
 
         ## get the stellar velocity of the bin
         sv = stellarvel[w][0]
         sv_sigma = 1/np.sqrt(stellarvel_ivar[w][0])
-
-        if abs(sv) > 5 * np.std(stellarvel) + np.median(stellarvel):
-            badbins['Stellar Vel'].append(ID)
-            mask_EW = True
 
         ## Calculate redshift
         z = (sv * (1+z_guess))/c + z_guess
@@ -98,10 +145,10 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=Fa
         restwave = wave / (1+z)
         restwave_sigma = wave * z_sigma / (1 + z)**2
 
+        # TODO
         if bokeh:
-            for y,x in zip(inds[0],inds[1]):
-                wavecube[np.arange(len(restwave)),y,x] = restwave
-
+            for dy,dx in zip(y,x):
+                wavecube[np.arange(len(restwave)),dy,dx] = restwave
 
         # define wavelength boundaries and store a slice object to slice the datacubes
         NaD_window = (restwave>region[0]) & (restwave<region[1])
@@ -135,230 +182,104 @@ def make_EW_map(cubefil,mapfil,z_guess,savepath,vmin=-0.2,verbose=False,bokeh=Fa
         W_sigma = np.sqrt( np.sum( ((dlam * flux_sigma_sliced/model_sliced)**2 + ((cont - flux_sliced/model_sliced) * dlam_sigma)**2)[W_mask] ) ) # EW uncertainty
 
         if not np.isfinite(W):
-            badbins['Infinite W'].append(ID)
-            ewmap[w] = -999
+            ewmap_qualflag[w] = -4
             continue
         
         if not np.isfinite(W_sigma):
-            badbins['Infinite EW_err'].append(ID)
-            ewmap_unc[w] = -999
+            ewmap_qualflag[w] = -5
             continue
         
         ewmap[w] = W
         ewmap_unc[w] = W_sigma
-
-        if not mask_EW:
-            ewmap_mask[w] = 1
-
-
-    logging.info('Creating plots...')
-    flatew = ewmap.flatten()
-    w = (flatew != 0) & (flatew != -999.0)
-    flatewcleaned = flatew[w]
     
-    bin_width = 3.5 * np.std(flatewcleaned) / (flatewcleaned.size ** (1/3))
-    nbins = (max(flatewcleaned) - min(flatewcleaned)) / bin_width
-    
-    plt.hist(flatewcleaned,bins=int(nbins),color='k')
-    plt.xlim(-5,5)
-    plt.xlabel(r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
-    plt.ylabel(r'$N_{\mathrm{spax}}$')
-    
-    im2name = f"{args.galname}-EW_distribution.{args.imgftype}"
-    output = os.path.join(savepath,im2name)
-    plt.savefig(output,bbox_inches='tight',dpi=150)
-    logging.info(f"EW distriubtion plot saved to {output}")
-    plt.close()
-    
-    
-    plotmap = np.copy(ewmap)
-    plotmap[(plotmap==0) | (plotmap<vmin)] = np.nan
-    
-    nvmax = round(np.median(plotmap[np.isfinite(plotmap)]) + 3 * np.std(plotmap[np.isfinite(plotmap)]),1)
-
-    im = plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=vmin,vmax=nvmax,
-           extent=[32.4, -32.6,-32.4, 32.6])
-    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
-    plt.ylabel(r'$\Delta \delta$ (arcsec)')
-    
-    ax = plt.gca()
-    ax.set_facecolor('lightgray')
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-
-    cbar = plt.colorbar(im,cax=cax,label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
-    #plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)    
-    
-    im1name = f"{args.galname}-EW_map.{args.imgftype}"
-    output = os.path.join(savepath,im1name)
-    plt.savefig(output,bbox_inches='tight',dpi=200)
-    logging.info(f"EW map plot saved to {output}")
-    plt.close()
-    
-
-
-    plotmap = np.copy(ewmap)
-    w = plotmap != -999.0
-    med = np.median(plotmap[w])
-    std = np.std(plotmap[w])
-
-    nvmin = med - 4 * std
-    nvmax = med + 4 * std
-
-    im = plt.imshow(plotmap,origin='lower',cmap='rainbow',vmin=nvmin,vmax=nvmax,
-           extent=[32.4, -32.6,-32.4, 32.6])
-    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
-    plt.ylabel(r'$\Delta \delta$ (arcsec)')
-    
-    ax = plt.gca()
-    ax.set_facecolor('lightgray')
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-
-    cbar = plt.colorbar(im,cax=cax,label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$')
-    #plt.colorbar(label=r'$\mathrm{EW_{Na\ D}\ (\AA)}$',fraction=0.0465, pad=0.01)    
-    
-    im1name = f"{args.galname}-EW_map_db.{args.imgftype}"
-    output = os.path.join(savepath,im1name)
-    plt.savefig(output,bbox_inches='tight',dpi=200)
-    logging.info(f"EW map plot saved to {output}")
-    plt.close()
-
-    if args.bokeh:
-        logging.info("Creating BOKEH plot.")
+    #TODO
+    if bokeh:
         keyword = f"{args.galname}-EW-bokeh"
-        make_bokeh_map(flux, model, ivar, wavecube, ewmap, spatial_bins, savepath, keyword)
+        #plotter.make_bokeh_map(flux, model, ivar, wavecube, ewmap, spatial_bins, savepath, keyword)
 
-    return ewmap, ewmap_mask, ewmap_unc, badbins
+    return {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_unc, "EW Map Quality Flag":ewmap_qualflag}
 
 
 def get_args():
 
+    parser = argparse.ArgumentParser(description="Measure equivalent width of ISM Na I absorption throughout an input galaxy and plot the associated maps.")
     
-    parser = argparse.ArgumentParser(description="A script to create an equivalent width map of ISM Na I for beta-corrected DAP outputs.")
-    
-    parser.add_argument('galname',type=str,help='Input galaxy name.')
-    parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
-    parser.add_argument('--imgftype', type=str, help="Input filetype for output map plots. [pdf/png]", default = "pdf")
-    parser.add_argument('--redshift',type=str,help='Input galaxy redshift guess.',default=None)
-    parser.add_argument('--bokeh', type=bool, help="Input [True/False] for creating a Bokeh interactive plot.", default = False)
+    parser.add_argument('galname', type = str, help = 'Input galaxy name.')
+    parser.add_argument('bin_method', type = str, help = 'Input DAP spatial binning method.')
+
+    parser.add_argument('-v','--verbose', type = bool, help = "Print verbose outputs (default: False)", action='store_true', default = False)
+    parser.add_argument('-nc','--no_corr', type = bool, help = "Perform analysis on the 'NO-CORR' DAP outputs. (default: False)", action='store_true', default = False)
+    parser.add_argument('-ow', '--overwrite', type = bool, help = "Write into any existing map file. Overwrite any equivalent data stored inside. (default: True)", action = 'store_true', default = True)
+    parser.add_argument('-np', '--new_plot', type = bool, action = "store_true", help = "Plot the maps to a new pdf rather than overwriting existing (default: False)", default = False)
+    parser.add_argument('-z', '--redshift', type=str, help='Use this extension to optionally input a galaxy redshift guess. (default: None)', default=None)
+
+    parser.add_argument('--bokeh', type = bool, help = "Broken (default: False)", default = False)
     
     return parser.parse_args()
 
 
 
 def main(args):
-    ## Full path of the script directory
-    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    plt.style.use(os.path.join(script_dir,"figures.mplstyle"))
-    ## Full path of the DAP outputs
-    data_dir = os.path.join(script_dir, "data")
+    ## initialize the verbose logger
+    logger = util.verbose_logger(args.verbose)
 
-    ## Path to the specific galaxy and binning method input
-    cube_dir = os.path.join(data_dir, "dap_outputs" ,f"{args.galname}-{args.bin_method}")
-    cube_dir_bc = os.path.join(cube_dir,"BETA_CORR")
-    check_filepath(cube_dir_bc, mkdir=False)
+    ## acquire all relevant datapaths
+    logger.info("Acquiring relevant files")
+    datapath_dict = file_handler.init_datapaths(args.galname, args.bin_method)
     
-    ## Path to save the plots
-    savepath = os.path.join(script_dir,"figures",'EW_map')
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
-    
-    ## All fits files within cube path
-    fils = glob(os.path.join(cube_dir_bc,'**','*.fits'),recursive=True)
-    
-    ## Finds the logcube and map files from the DAP output
-    cubefil = None
-    mapfil = None
-    for fil in fils:
-        if 'LOGCUBE' in fil:
-            cubefil = fil
-        if 'MAPS' in fil:
-            mapfil = fil
-    
-    if cubefil is None:
-        raise ValueError(f'Cube File not found in {cube_dir_bc}')
-    if mapfil is None:
-        raise ValueError(f'maps File not found in {cube_dir_bc}')
-    
-    
+    ## redshift from config file if no input
     redshift = args.redshift
-
-    
     if redshift is None:
-        ## Get the redshift guess from the .ini file
-        config_dir = os.path.join(data_dir,cube_dir,"config")
-        ini_fil = glob(f"{config_dir}/*.ini")
-        config_fil = ini_fil[0]
-        if len(ini_fil)>1:
-            warnings.warn(f"Multiple configuration files found in {config_dir}.",UserWarning)
-            for fil in ini_fil:
-                if 'cleaned' in fil:
-                    config_fil = fil
-
-            print(f"Defauling configuration file to {config_fil}.")
-
-
+        logger.info("Parsing config file for redshift")
+        config_file = datapath_dict['CONFIG']
         config = configparser.ConfigParser()
         parsing = True
         while parsing:
             try:
-                config.read(config_fil)
+                config.read(config_file)
                 parsing = False
             except configparser.Error as e:
-                print(f"Error parsing file: {e}")
-                print(f"Cleaning {config_fil}")
-                clean_ini_file(config_fil, overwrite=True)
-
+                util.verbose_print(args.verbose, f"Error parsing file: {e}")
+                util.verbose_print(args.verbose, f"Cleaning {config_file}")
+                util.clean_ini_file(config_file, overwrite=True)
 
         redshift = config['default']['z']
-        print(f"Redshift z={redshift} found in {config_fil}.")
+        util.verbose_print(args.verbose, f"Redshift z = {redshift} found in {config_file}")
+
+    ## default to beta-corr data unless -nc argument
+    corr_key = 'BETA-CORR'
+    if args.no_corr:
+        corr_key = 'NO-CORR'
+
+    ## acquire logcube and maps files from datapath dict, raise error if they were not found
+    cubefil = datapath_dict[corr_key]['LOGCUBE']
+    mapfil = datapath_dict[corr_key]['MAPS']
+    if cubefil is None or mapfil is None:
+        raise ValueError(f"LOGCUBE or MAPS file not found for {args.galname}-{args.bin_method}-{corr_key}")
+
+    ## compute EW maps
+    EW_dict = measure_EW(cubefil, mapfil, redshift, args.verbose, args.bokeh)
+
+    ## initialize the output paths
+    root_dir = defaults.get_default_path('data')
+    local_dir = os.path.join(root_dir, 'local_outputs')
+    gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}")
+    gal_figures_dir = os.path.join(gal_local_dir, "figures")
+
+    util.check_filepath([gal_local_dir, gal_figures_dir], mkdir=True, verbose=args.verbose)
+
+    hdu_name = "EQ_WIDTH_NAI"
+    units = "Angstrom"
+    mapdict = file_handler.standard_map_dict(args.galname, hdu_name, units, EW_dict)
+    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 
+                                  overwrite = args.overwrite, verbose = args.verbose)
+
     
+    ## create the figures with the map plotter
+    plotter.map_plotter(EW_dict['EW Map'], EW_dict['EW Map Mask'], hdu_name, r'$\mathrm{EW_{Na\ D}}$', r'$\mathrm{\AA}$',
+                  args.galname, args.binmethod, error=EW_dict['EW Map Uncertainty'])
 
-    EW, EW_sigma, EW_mask, bbins = make_EW_map(cubefil,mapfil,redshift,savepath)
-    
-    mapspath = os.path.join(data_dir,cube_dir,"maps")
-    if not os.path.exists(mapspath):
-        os.mkdir(mapspath)
 
-    savefits = os.path.join(mapspath,f"{cube_dir}_EW-maps.fits")
-
-    logging.info(f"Writing data...")
-    primary = fits.PrimaryHDU()
-
-    hdu1 = fits.ImageHDU(EW, name="EW")
-    hdu1.header['DESC'] = "ISM Na I equivalent width map"
-    hdu1.header['UNITS'] = "Angstrom"
-    
-    hdu2 = fits.ImageHDU(EW_sigma, name="EW_SIGMA")
-    hdu2.header['DESC'] = "Propagated error on the EW"
-    hdu2.header['UNITS'] = "Angstrom"
-
-    hdu3 = fits.ImageHDU(EW_mask, name="EW_MASK")
-    hdu3.header['DESC'] = "Mask where EW values should be ignored"
-
-    cols = []
-    for key,values in bbins.items():
-        cols.append(fits.Column(name=key, format='J', array = values))
-
-    tablehdu = fits.BinTableHDU.from_columns(cols, name="BIN_IGNORES")
-    tablehdu.header['DESC'] = "Spatial bin IDs of masked bins"
-
-    hdul = fits.HDUList([primary,hdu1,hdu2,hdu3,tablehdu])
-    hdul.writeto(savefits,overwrite=True)
-    logging.info(f'Equivalent Width data written to {savefits}')
-
-    logging.info(f"EW for {args.galname} finished with the following rejections:")
-    keys = list(bbins.keys())
-    print(f"Poor stellar continuum/emline fits: {len(bbins[keys[0]])} bins.")
-    print(f"Poor stellar kinematic fits: {len(bbins[keys[1]])} bins.")
-    print(f"Stellar velocity > 4 sigma: {len(bbins[keys[2]])} bins.")
-    print(f"Non finite EW: {bbins[keys[3]]} bins.")
-    
 if __name__ == "__main__":
     args = get_args()
-    if args.imgftype == "pdf" or args.imgftype == "png":
-        pass
-    else:
-        raise ValueError(f"{args.imgftype} not a valid value for the output image filetype.\nAccepted formats [pdf/png]\nDefault: pdf")
     main(args)
