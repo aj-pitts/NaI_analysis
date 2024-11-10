@@ -10,48 +10,6 @@ from astropy.io import fits
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import defaults
 
-def clean_ini_file(input_file, overwrite=False):
-    """
-    Function to clean an .ini configuration file line-by-line if `configparser` returns an error
-    while parsing the file.
-
-    Parameters
-    ----------
-    input_file : str
-        The string containing the filename or filepath to the .ini file which must be cleaned.
-
-    overwrite : bool, optional
-        Flag to determine whether or not the input file will be overwritten. If False, a few file
-        will be created with the same filename + "_cleaned" included before the .ini extension.
-    """
-    if overwrite:
-        output_file = input_file
-    else:
-        fname, fext = os.path.splitext(input_file)
-        output_file = f"{fname}_cleaned{fext}"
-
-    print(f"Reading {input_file}")
-    with open(input_file, 'r') as file:
-        lines = file.readlines()
-
-    print(f"Writing configuration file to {output_file}...")
-    with open(output_file, 'w') as file:
-        section = None
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith('[') and line.endswith(']'):
-                section = line
-                file.write(line + '\n')
-            elif '=' in line:
-                file.write(line + '\n')
-            else:
-                if section:
-                    file.write(f"{line} = value\n")
-
-    print("Done.")
-
 def check_filepath(filepath, mkdir=True, verbose=True, error=True):
     """
     Checks whether or not a filepath exists using the `os` package. If the filepath does not exist,
@@ -338,52 +296,27 @@ def progress_printer(iter_int, max_iter, print_string, verbose = True):
 
     verbose_print(verbose, f"{print_string} {iter_int+1}/{max_iter}{dots}", end='\r')
 
-def redshift_from_config(config_fil, verbose):
+def unpack_param(param):
     """
-    Extracts the redshift value ('z') from a configuration file.
-
+    Extracts the value and error from the input parameter.
+    
     Parameters
     ----------
-    config_fil : str
-        The path to the configuration file (typically a `.ini` file).
-    verbose : bool
-        If True, prints verbose output for errors and cleaning steps during parsing.
-
+    param : float or tuple
+        The parameter can be either a float (value) or a tuple (value, error).
+    
     Returns
     -------
-    str
-        The redshift value ('z') as a string from the 'default' section of the configuration file.
-
-    Notes
-    -----
-    The function attempts to read the configuration file and parses the redshift 
-    value from the 'default' section. If an error occurs while parsing the file, 
-    the function will attempt to clean and re-read the file. Any errors during parsing 
-    are printed if `verbose` is set to True.
-
-    If the configuration file cannot be parsed correctly, the function will repeatedly 
-    clean the file using `modules.util.clean_ini_file` and try to read it again until 
-    successful.
-
-    Example
-    -------
-    >>> z = redshift_from_config("config.ini", verbose=True)
-    >>> print(z)
-    '0.023'
+    value : float
+        The main value of the parameter.
+    uncertainty : float or None
+        The uncertainty associated with the parameter, if provided. Otherwise, None.
     """
 
-    config = configparser.ConfigParser()
-    parsing = True
-    while parsing:
-        try:
-            config.read(config_fil)
-            parsing = False
-        except configparser.Error as e:
-            verbose_print(verbose, f"Error parsing file: {e}")
-            verbose_print(verbose, f"Cleaning {config_fil}")
-            clean_ini_file(config_fil, overwrite=True)
+    if isinstance(param, tuple):
+        value = param[0]
+        uncertainty = param[1]
+    else:
+        value, uncertainty = param, None
 
-
-    redshift = config['default']['z']
-
-    return redshift
+    return value, uncertainty

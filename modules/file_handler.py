@@ -7,8 +7,16 @@ import time
 import sys
 import defaults
 import warnings
+import configparser
 
 # TODO: update the docstring, add verbose printing, add better bc/nc option
+
+# 
+# 
+# Data acquisition
+# 
+# 
+
 def init_datapaths(galname, bin_method, verbose=False):
     """
     Acquires the path(s) to the primary file(s) of a given galaxy by request.
@@ -118,8 +126,12 @@ def init_datapaths(galname, bin_method, verbose=False):
 
     return outdict
 
-
-
+# 
+# 
+# Section for handling FITS file writing
+# format headers, automatically write 2D maps into FITS Files
+# 
+# 
 
 def standard_header_dict(galname, HDU_keyword, unit_str, flag):
     """
@@ -218,6 +230,7 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
         }
     
     return header
+
 
 def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
     """
@@ -325,7 +338,6 @@ def header_dict_formatter(header_dict):
             reformat_dict[key] = (value, comment)
 
     return reformat_dict
-
 
 
 def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbose = False):
@@ -473,3 +485,102 @@ def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbo
 
         hdul.writeto(filepath, overwrite=True)
         print(f"Created new FITS file '{filepath}'.")
+
+# 
+# 
+# Configuration Files Section
+# Parser and cleaner for reading .ini files
+# 
+# 
+
+def parse_config(config_fil, verbose):
+    """
+    Parses a configuration file to retrieve data from the 'default' section.
+
+    This function reads a configuration file (typically in `.ini` format) and attempts to parse
+    it using `configparser`. If a parsing error occurs, the function applies a cleaning step
+    via `modules.file_handler.clean_ini_file` and retries until successful.
+
+    Parameters
+    ----------
+    config_fil : str
+        Path to the configuration file to be parsed.
+    verbose : bool
+        If True, outputs detailed messages about any errors encountered and steps taken
+        during file cleaning.
+
+    Returns
+    -------
+    configparser.SectionProxy
+        The 'default' section of the configuration file as a `configparser.SectionProxy` object,
+        allowing access to key-value pairs within this section.
+
+    Notes
+    -----
+    The function repeatedly attempts to read the configuration file until successful. If a
+    `configparser.Error` is raised, it cleans the file by calling `clean_ini_file` from
+    `modules.util`, overwriting the file if necessary, and attempts to parse it again. Verbose
+    output provides information on errors and cleaning actions when `verbose` is set to True.
+
+    Example
+    -------
+    >>> config_data = parse_config("config.ini", verbose=True)
+    >>> print(config_data["z"])
+    '0.023'
+    """
+
+    config = configparser.ConfigParser()
+    parsing = True
+    while parsing:
+        try:
+            config.read(config_fil)
+            parsing = False
+        except configparser.Error as e:
+            util.verbose_print(verbose, f"Error parsing file: {e}")
+            util.verbose_print(verbose, f"Cleaning {config_fil}")
+            clean_ini_file(config_fil, overwrite=True)
+
+
+    return config['default']
+
+def clean_ini_file(input_file, overwrite=False):
+    """
+    Function to clean an .ini configuration file line-by-line if `configparser` returns an error
+    while parsing the file.
+
+    Parameters
+    ----------
+    input_file : str
+        The string containing the filename or filepath to the .ini file which must be cleaned.
+
+    overwrite : bool, optional
+        Flag to determine whether or not the input file will be overwritten. If False, a few file
+        will be created with the same filename + "_cleaned" included before the .ini extension.
+    """
+    if overwrite:
+        output_file = input_file
+    else:
+        fname, fext = os.path.splitext(input_file)
+        output_file = f"{fname}_cleaned{fext}"
+
+    print(f"Reading {input_file}")
+    with open(input_file, 'r') as file:
+        lines = file.readlines()
+
+    print(f"Writing configuration file to {output_file}...")
+    with open(output_file, 'w') as file:
+        section = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith('[') and line.endswith(']'):
+                section = line
+                file.write(line + '\n')
+            elif '=' in line:
+                file.write(line + '\n')
+            else:
+                if section:
+                    file.write(f"{line} = value\n")
+
+    print("Done.")
