@@ -189,7 +189,7 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_keyword: str, label: st
         plt.savefig(errormapfigname,bbox_inches='tight',dpi=dpi)
         plt.close()
         logger.info(f"{galname} {fig_keyword} uncertainty map plot saved to {stdcustfigname}")
-
+        
 
 
 
@@ -290,4 +290,3 @@ def plot_local_maps(mapsfil, verbose = True):
     logger = verbose_logger(verbose=verbose)
     hdul = fits.open(mapsfil)
     mapkeys = [field for field in hdul.keys() if 'MAP' in field.split('_')]
-    
