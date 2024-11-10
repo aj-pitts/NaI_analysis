@@ -9,10 +9,10 @@ from ..modules import defaults, util, file_handler, plotter
 
 def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     """
-    Measure the equivalent width (EW) of spectral features in a 3D data cube.
+    Measure the equivalent width (EW) of spectral features in a DAP 3D data cube.
 
-    This function calculates the equivalent width (EW) of spectral features in a
-    data cube file and generates corresponding maps. The analysis is based on an
+    This function calculates the equivalent width (EW) of the neutral sodium absorbtion
+    doublet in a data cube file and generates corresponding maps. The analysis is based on an
     estimated redshift (`z_guess`) and outputs the results to a specified location.
     Optional visualizations of the results can be generated using Bokeh.
 
@@ -40,41 +40,27 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     -------
     results : dict
         A dictionary containing the calculated EW values and any relevant metadata.
-        Key contents may include:
+        Key contents include:
         
-        - 'EW_map' : 2D numpy.ndarray
+        - 'EW Map' : 2D numpy.ndarray
             Array of calculated equivalent widths mapped to spatial locations.
+
+        - 'EW Map Mask' : 2D numpy.ndarray
+            Array of boolean integers; data quality mask for the EW measurements. Values of 1
+            (True) are poor quality.
             
-        - 'error_map' : 2D numpy.ndarray
+        - 'EW Map Uncertainty' : 2D numpy.ndarray
             Array of uncertainties associated with the equivalent width measurements.
-            
-        - 'other_results' : dict
-            Additional results or parameters, such as fitting statistics or
-            derived parameters, if applicable.
 
-    Raises
-    ------
-    FileNotFoundError
-        If either `cubefil` or `mapfil` cannot be found or opened.
-        
-    ValueError
-        If `z_guess` is outside of an expected range or if input data is
-        incompatible.
-
-    Notes
-    -----
-    - This function assumes the spectral data is in a 3D data cube format with
-      axes representing spatial dimensions and wavelength.
-    - The redshift guess (`z_guess`) is crucial for aligning observed features
-      with their rest-frame wavelengths.
-    - Requires `astropy` for FITS file handling and optional dependencies if Bokeh
-      visualization is enabled.
+        - 'EW Map Quality Flag' : 2D numpy.ndarray
+            Array of integer flags representing the specific data quality of each spatial
+            bin; see `modules.util.defaults.local_quality_flag` for details.
 
     Examples
     --------
     Calculate EW and save results to a specific directory with verbose output:
 
-    >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03, savepath="results/",
+    >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03,
     ...            verbose=True)
 
     Generate an interactive Bokeh plot:
@@ -119,11 +105,13 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     
     ## init empty arrays to write measurements to
     l, ny, nx = flux.shape
-    ewmap, ewmap_unc = np.zeros((ny,nx)) -999.0
-    ewmap_qualflag, ewmap_mask = np.ones((ny,nx))
+    ewmap, ewmap_unc = np.zeros((ny,nx)) - 999.0
+    ewmap_qualflag = np.ones((ny,nx))
+    ewmap_mask = np.zeros((ny,nx))
     wavecube = np.zeros(flux.shape)
 
     for ID in tqdm(uniqids[1:], desc="Constructing equivalent width map."):
+        mask_ew = False
         w = spatial_bins == ID
         y, x = np.where(w)
 
@@ -131,7 +119,7 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
         ewmap_qualflag[w] = bin_check
 
         if bin_check != 1:
-            ewmap_mask[w] = 0
+            mask_ew = True
 
         ## get the stellar velocity of the bin
         sv = stellarvel[w][0]
@@ -183,12 +171,16 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
 
         if not np.isfinite(W):
             ewmap_qualflag[w] = -4
+            mask_ew = True
             continue
         
         if not np.isfinite(W_sigma):
             ewmap_qualflag[w] = -5
+            mask_ew = True
             continue
         
+        if mask_ew:
+            ewmap_mask[w] = 1
         ewmap[w] = W
         ewmap_unc[w] = W_sigma
     
@@ -230,21 +222,9 @@ def main(args):
     ## redshift from config file if no input
     redshift = args.redshift
     if redshift is None:
-        logger.info("Parsing config file for redshift")
-        config_file = datapath_dict['CONFIG']
-        config = configparser.ConfigParser()
-        parsing = True
-        while parsing:
-            try:
-                config.read(config_file)
-                parsing = False
-            except configparser.Error as e:
-                util.verbose_print(args.verbose, f"Error parsing file: {e}")
-                util.verbose_print(args.verbose, f"Cleaning {config_file}")
-                util.clean_ini_file(config_file, overwrite=True)
-
-        redshift = config['default']['z']
-        util.verbose_print(args.verbose, f"Redshift z = {redshift} found in {config_file}")
+        configuration = file_handler.parse_config(datapath_dict['CONFIG'], verbose=args.verbose)
+        redshift = configuration['z']
+        util.verbose_print(args.verbose, f"Redshift z = {redshift} found in {datapath_dict['CONFIG']}")
 
     ## default to beta-corr data unless -nc argument
     corr_key = 'BETA-CORR'
