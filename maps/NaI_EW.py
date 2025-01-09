@@ -1,11 +1,10 @@
 import numpy as np
 from astropy.io import fits
 import argparse
-import configparser
+import warnings
 import os
 from tqdm import tqdm
-from ..modules import defaults, util, file_handler, plotter
-
+from modules import defaults, util, file_handler, plotter
 
 def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     """
@@ -52,10 +51,6 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
         - 'EW Map Uncertainty' : 2D numpy.ndarray
             Array of uncertainties associated with the equivalent width measurements.
 
-        - 'EW Map Quality Flag' : 2D numpy.ndarray
-            Array of integer flags representing the specific data quality of each spatial
-            bin; see `modules.util.defaults.local_quality_flag` for details.
-
     Examples
     --------
     Calculate EW and save results to a specific directory with verbose output:
@@ -68,7 +63,6 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03, bokeh=True)
     
     """
-    logger = util.verbose_logger(verbose)
 
     ## initialize values
     c = 2.998e5 #speed of light km/s
@@ -83,20 +77,20 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     
     flux = cube['FLUX'].data
     ivar = cube['IVAR'].data
-    mask = cube['MASK'].data.astype(bool)
+    mask = cube['MASK'].data #DAPSPECMASK
 
     wave = cube['WAVE'].data
 
     model = cube['MODEL'].data
-    model_mask = cube['MODEL_MASK'].data
+    model_mask = cube['MODEL_MASK'].data #DAPSPECMASK
     
     stellarvel = maps['STELLAR_VEL'].data
-    stellarvel_mask = maps['STELLAR_VEL_MASK'].data.astype(bool)
+    stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
     stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
 
-    binids = maps['BINID'].data ## 0: stacked spectra, 1: stellar-continuum results, 2: empty, 3: emline model results, 4: empty
-
+    binids = maps['BINID'].data 
     spatial_bins = binids[0]
+
     uniqids = np.unique(spatial_bins)
     
 
@@ -105,21 +99,27 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     
     ## init empty arrays to write measurements to
     l, ny, nx = flux.shape
-    ewmap, ewmap_unc = np.zeros((ny,nx)) - 999.0
-    ewmap_qualflag = np.ones((ny,nx))
+    ewmap = np.zeros((ny,nx)) - 999.0
+    ewmap_unc = np.zeros((ny,nx)) - 999.0
     ewmap_mask = np.zeros((ny,nx))
     wavecube = np.zeros(flux.shape)
 
-    for ID in tqdm(uniqids[1:], desc="Constructing equivalent width map."):
-        mask_ew = False
+    items = uniqids[1:]
+    iterator = tqdm(uniqids[1:], desc="Constructing equivalent width map.") if verbose else items
+
+
+    ## mask unused spaxels
+    w = spatial_bins == -1
+    ewmap_mask[w] = 6
+
+    for ID in iterator:
         w = spatial_bins == ID
         y, x = np.where(w)
 
-        bin_check = util.check_bin_ID(ID, binids, stellarvel, stellarvel_mask)
-        ewmap_qualflag[w] = bin_check
-
-        if bin_check != 1:
-            mask_ew = True
+        bin_check = util.check_bin_ID(ID, spatial_bins, DAPPIXMASK_list=[stellarvel_mask],
+                                      stellar_velocity_map=stellarvel)
+        
+        ewmap_mask[w] = bin_check
 
         ## get the stellar velocity of the bin
         sv = stellarvel[w][0]
@@ -141,46 +141,49 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
         # define wavelength boundaries and store a slice object to slice the datacubes
         NaD_window = (restwave>region[0]) & (restwave<region[1])
         NaD_window_inds = np.where(NaD_window)[0]
-        slice_inds = (NaD_window_inds[:, None], y, x)
+        NaD_window_inds_wavelength = np.insert(NaD_window_inds, 0, int(NaD_window_inds[0]-1))
+        slice_inds = (NaD_window_inds[:, None], y[0], x[0])
 
         # slice wavelength and uncertainty arrays to NaD window
-        wave_window = restwave[NaD_window_inds]
-        wave_window_sigma = restwave_sigma[NaD_window_inds]
+        wave_window = restwave[NaD_window_inds_wavelength]
+        wave_window_sigma = restwave_sigma[NaD_window_inds_wavelength]
 
-        # slice flux and model datacubes to wavelength window and bin
-        # take one array from each bin
-        flux_sliced = flux[slice_inds][0]
-        ivar_sliced = ivar[slice_inds][0]
+        # slice flux and model datacubes to bin, spaxel, and wavelength window
+        flux_sliced = np.array(flux[slice_inds]).ravel()
+        ivar_sliced = np.array(ivar[slice_inds]).ravel()
         flux_sigma_sliced = 1 / np.sqrt(ivar_sliced)
-        mask_sliced = mask[slice_inds][0]
 
-        model_sliced = model[slice_inds][0]
-        model_mask_sliced = model_mask[slice_inds][0]
+        mask_sliced = np.array(mask[slice_inds]).ravel()
+        model_sliced = np.array(model[slice_inds]).ravel()
+        model_mask_sliced = np.array(model_mask[slice_inds]).ravel()
 
+        ## change the DAPSPECMASKS from bitmasks to boolean array masks
+        flux_mask_bool = util.spec_mask_handler(mask_sliced).astype(bool)
+        model_mask_bool = util.spec_mask_handler(model_mask_sliced).astype(bool)
+        W_mask = np.logical_or(flux_mask_bool, model_mask_bool) # combined flux and model masks
 
         ## compute equivalent width
         cont = np.ones(len(flux_sliced)) # normalized continuum
-        dlam = np.diff(wave_window) # Delta lambda
+        dlam = np.diff(wave_window)# Delta lambda
         dlam_sigma = np.hypot(wave_window_sigma[:-1], wave_window_sigma[1:]) # Delta lambda uncertainty
 
-        W_mask = np.logical_or(mask_sliced.astype(bool), model_mask_sliced.astype(bool)) # combined flux and model masks
-        
-        W = np.sum(( (cont - flux_sliced / model_sliced ) * dlam)[W_mask]) # Equivalent wdith
 
-        W_sigma = np.sqrt( np.sum( ((dlam * flux_sigma_sliced/model_sliced)**2 + ((cont - flux_sliced/model_sliced) * dlam_sigma)**2)[W_mask] ) ) # EW uncertainty
+        W = np.sum(( (cont - flux_sliced / model_sliced ) * dlam)[~W_mask]) # Equivalent width, masked before summming
 
-        if not np.isfinite(W):
-            ewmap_qualflag[w] = -4
-            mask_ew = True
-            continue
+        W_sigma = np.sqrt( np.sum( ((dlam * flux_sigma_sliced/model_sliced)**2 + ((cont - flux_sliced/model_sliced) * dlam_sigma)**2)[~W_mask] ) ) # EW uncertainty
         
-        if not np.isfinite(W_sigma):
-            ewmap_qualflag[w] = -5
-            mask_ew = True
+
+        if not np.isfinite(W) or not np.isfinite(W_sigma):
+            if not np.isfinite(W):
+                ewmap[w] = -999
+                ewmap_mask[w] = 4
+            
+            if not np.isfinite(W_sigma):
+                ewmap_unc[w] = -999
+                ewmap_mask[w] = 5
+
             continue
-        
-        if mask_ew:
-            ewmap_mask[w] = 1
+
         ewmap[w] = W
         ewmap_unc[w] = W_sigma
     
@@ -189,7 +192,7 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
         keyword = f"{args.galname}-EW-bokeh"
         #plotter.make_bokeh_map(flux, model, ivar, wavecube, ewmap, spatial_bins, savepath, keyword)
 
-    return {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_unc, "EW Map Quality Flag":ewmap_qualflag}
+    return {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_unc}
 
 
 def get_args():
@@ -199,10 +202,8 @@ def get_args():
     parser.add_argument('galname', type = str, help = 'Input galaxy name.')
     parser.add_argument('bin_method', type = str, help = 'Input DAP spatial binning method.')
 
-    parser.add_argument('-v','--verbose', type = bool, help = "Print verbose outputs (default: False)", action='store_true', default = False)
-    parser.add_argument('-nc','--no_corr', type = bool, help = "Perform analysis on the 'NO-CORR' DAP outputs. (default: False)", action='store_true', default = False)
-    parser.add_argument('-ow', '--overwrite', type = bool, help = "Write into any existing map file. Overwrite any equivalent data stored inside. (default: True)", action = 'store_true', default = True)
-    parser.add_argument('-np', '--new_plot', type = bool, action = "store_true", help = "Plot the maps to a new pdf rather than overwriting existing (default: False)", default = False)
+    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
+    parser.add_argument('-ow', '--overwrite', help = "Write into any existing map file. Overwrite any equivalent data stored inside. (default: True)", action = 'store_false', default = True)
     parser.add_argument('-z', '--redshift', type=str, help='Use this extension to optionally input a galaxy redshift guess. (default: None)', default=None)
 
     parser.add_argument('--bokeh', type = bool, help = "Broken (default: False)", default = False)
@@ -212,11 +213,13 @@ def get_args():
 
 
 def main(args):
-    ## initialize the verbose logger
-    logger = util.verbose_logger(args.verbose)
+    # Suppress all warnings
+    warnings.filterwarnings("ignore")
+
+
+    analysisplan = defaults.analysis_plans()
 
     ## acquire all relevant datapaths
-    logger.info("Acquiring relevant files")
     datapath_dict = file_handler.init_datapaths(args.galname, args.bin_method)
     
     ## redshift from config file if no input
@@ -228,36 +231,35 @@ def main(args):
 
     ## default to beta-corr data unless -nc argument
     corr_key = 'BETA-CORR'
-    if args.no_corr:
-        corr_key = 'NO-CORR'
 
     ## acquire logcube and maps files from datapath dict, raise error if they were not found
-    cubefil = datapath_dict[corr_key]['LOGCUBE']
-    mapfil = datapath_dict[corr_key]['MAPS']
+    cubefil = datapath_dict['LOGCUBE']
+    mapfil = datapath_dict['MAPS']
     if cubefil is None or mapfil is None:
         raise ValueError(f"LOGCUBE or MAPS file not found for {args.galname}-{args.bin_method}-{corr_key}")
 
     ## compute EW maps
-    EW_dict = measure_EW(cubefil, mapfil, redshift, args.verbose, args.bokeh)
+    EW_dict = measure_EW(cubefil, mapfil, redshift, verbose = args.verbose, bokeh = args.bokeh)
 
     ## initialize the output paths
     root_dir = defaults.get_default_path('data')
     local_dir = os.path.join(root_dir, 'local_outputs')
-    gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}")
-    gal_figures_dir = os.path.join(gal_local_dir, "figures")
+    gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", corr_key, analysisplan)
+    gal_figures_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", "figures")
 
     util.check_filepath([gal_local_dir, gal_figures_dir], mkdir=True, verbose=args.verbose)
 
     hdu_name = "EQ_WIDTH_NAI"
     units = "Angstrom"
     mapdict = file_handler.standard_map_dict(args.galname, hdu_name, units, EW_dict)
-    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 
-                                  overwrite = args.overwrite, verbose = args.verbose)
-
+    #file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, gal_local_dir,
+    #                              overwrite = args.overwrite, verbose = args.verbose)
+    file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'EW-map', gal_local_dir,
+                                     overwrite= args.overwrite, verbose= args.verbose)
     
     ## create the figures with the map plotter
-    plotter.map_plotter(EW_dict['EW Map'], EW_dict['EW Map Mask'], hdu_name, r'$\mathrm{EW_{Na\ D}}$', r'$\mathrm{\AA}$',
-                  args.galname, args.binmethod, error=EW_dict['EW Map Uncertainty'])
+    plotter.map_plotter(EW_dict['EW Map'], EW_dict['EW Map Mask'], gal_figures_dir, hdu_name, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$',
+                  args.galname, args.bin_method, error=EW_dict['EW Map Uncertainty'],vmin=-0.2,vmax=1.5, s=1)
 
 
 if __name__ == "__main__":

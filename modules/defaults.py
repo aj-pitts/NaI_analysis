@@ -87,22 +87,27 @@ def local_quality_flag():
     -------
     dict
         A dictionary of integer keys and string descriptions of integer quality flag meaning:
-
-    Examples
-    --------
-    >>> flags = local_quality_flag()
-    >>> print(flags[1])
-    "The bin was not flagged by any input and is good to be used."
-    
-    >>> print(flags[-3])
-    "The computed value is NaN"
     """
     
-    flags = {1:'The bin was not flagged by any input and is good to be used.',
-             0:'The bin was flagged by either the stellar model results, the emission line model results.',
-             -1:'The bin was flagged by the data quality mask for the stellar velocity results.',
-             -2:'The stellar velocity of the bin was not flagged, but exceeds the number of standard deviations beyond the median of the distribution of velocities allowed during the computation.',
-             -3:'The computed value is NaN',
-             -4:'The computed uncertainty is NaN'
+    flags = {0:'No mask',
+             1:'The bin contained spaxel(s) masked by the MANGA_DAPSPECMASK.',
+             2:'The bin contained spaxel(s) masked by the MANGA_DAPPIXMASK.',
+             3:'The bin STELLAR_VEL exceeds the user-set threshold.',
+             4:'The computed value is NaN',
+             5:'The computed uncertainty is NaN',
+             6:'Spaxel not included in DAP',
+             7:'Bin S/N is below threshold',
              }
     return flags
+
+def analysis_plans():
+    """
+    Returns a dictionary of the current default analysis plan methods.
+
+    Returns
+    -------
+    str
+        'MILESHC-MASTARSSP-NOISM'
+
+    """
+    return 'MILESHC-MASTARSSP-NOISM'

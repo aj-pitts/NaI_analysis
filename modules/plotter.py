@@ -2,8 +2,9 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import defaults
-from util import verbose_logger
+import modules.defaults as defaults
+import modules.util as util
+from modules.util import verbose_print
 
 import bokeh.plotting as bp
 from bokeh.models import ColumnDataSource, TapTool, CustomJS, ColorBar, LinearColorMapper, Div
@@ -12,7 +13,7 @@ from bokeh.transform import linear_cmap
 from bokeh.io import output_file, show, save
 from bokeh.models import BasicTicker, ColorBar
 
-def map_plotter(image: np.ndarray, mask: np.ndarray, fig_keyword: str, label: str, units: str, galname: str, 
+def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_keyword: str, label: str, units: str, galname: str, 
              bin_method: str, verbose = True, **kwargs):
     """
     Creates the set of 2D "maps" for a given measurement distribution using `matplotlib.pyplot`.
@@ -58,137 +59,133 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_keyword: str, label: st
         | std         | float      | The number of standard deviations above and below the        |
         |             |            | median to restrict the colorscale of the "std plot". If not  |
         |             |            | specified, the default is 3.                                 |
-        | figpath     | str        | The absolute filepath to the figures directory.              |
-        |             |            | figures directory.                                           |
         | figname     | str        | The leading name of each figure file to be written.          |
         | figext      | str        | The filetype extension of the figure file.                   |
         | error       | np.ndarray | Map of propagated uncertainties corresponding to `image`.    |
         
     """
     ### init verbose logger
-    logger = verbose_logger(verbose)
 
     plt.style.use(defaults.matplotlib_rc())
-    default_figpath = defaults.get_default_path('local_outputs/figures')
 
     ### unpack and handle defaults for all kwargs
     # names and paths
-    figpath = kwargs.get('figpath', default_figpath)
     figext = kwargs.get('figext', 'pdf')
     figname = kwargs.get('figname', f'{galname}-{bin_method}-{fig_keyword}')
 
-    histfigname = os.path.join(figpath, f"{figname}-histogram.{figext}")
-    stdfigname = os.path.join(figpath, f"{figname}-map.{figext}")
+    histfigname = os.path.join(fig_save_path, f"{figname}-histogram.{figext}")
+    stdfigname = os.path.join(fig_save_path, f"{figname}-map.{figext}")
     
     # values and required maptlotlib kwargs
     s = kwargs.get('std', 3)
     cmap = kwargs.get('cmap', 'rainbow')
-    dpi = kwargs.get('dpi', 200)
     errormap = kwargs.get('error', None)
 
     ### handle required arguments
-    mask = mask.astype(bool)
-    masked_data = image[~mask]
-
-    median = np.median(image[~mask])
-    standard_deviation = np.std(image[~mask])
-
     value_string = f"{label} {units}"
 
+    image_mask = mask.astype(bool)
 
-    #### make the plots
-    ## histogram
+    masked_data = image[~image_mask]
+    median = np.median(masked_data)
+    standard_deviation = np.std(masked_data)
 
-    #flatten data
-    flatdata = np.copy(masked_data).flatten()
+    plotmap = np.copy(image)
+    plotmap[image_mask] = np.nan
+
+    ###############################
+    ######## historgram ###########
+    ###############################
 
     #universal number of bins calculation
-    bin_width = 3.5 * np.std(flatdata) / (flatdata.size ** (1/3))
-    nbins = (max(flatdata) - min(flatdata)) / bin_width
-
-    plt.hist(flatdata,bins=int(nbins),color='k')
+    bin_width = 3.5 * standard_deviation / (masked_data.size ** (1/3))
+    nbins = (max(masked_data) - min(masked_data)) / bin_width
+    plt.figure()
+    plt.hist(masked_data,bins=int(nbins),color='k')
     plt.xlabel(label)
     plt.ylabel(r"$N_{\mathrm{bins}}$")
     plt.xlim(median - 7 * standard_deviation, median + 7 * standard_deviation)
 
     plt.savefig(histfigname, bbox_inches='tight')
     plt.close()
-    logger.info(f"{galname} {fig_keyword} histogram saved to {histfigname}")
+    print(f"{galname} {fig_keyword} histogram saved to {histfigname}")
 
 
-    ## STD map
+    ###############################
+    ########## STDMap #############
+    ###############################
     vmin = median - s * standard_deviation
     vmax = median + s * standard_deviation
 
-    plotmap = np.copy(image)
-    plotmap[mask] = np.nan
-
+    plt.figure()
     im = plt.imshow(plotmap,cmap=cmap,vmin=vmin,vmax=vmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
-    plt.xlabel(r'$\alpha$ (arcsec)')
-    plt.ylabel(r'$\delta$ (arcsec)')
+    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+    plt.ylabel(r'$\Delta \delta$ (arcsec)')
     ax = plt.gca()
     ax.set_facecolor('lightgray')
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("top", size="5%", pad=0.01)
 
     cbar = plt.colorbar(im,cax=cax,orientation = 'horizontal')
-    cbar.set_label(value_string,fontsize=15,labelpad=-45)
+    cbar.set_label(value_string,fontsize=15,labelpad=-55)
     cax.xaxis.set_ticks_position('top')
     
 
-    plt.savefig(stdfigname, bbox_inches='tight',dpi=dpi)
+    plt.savefig(stdfigname, bbox_inches='tight')
     plt.close()
-    logger.info(f"{galname} {fig_keyword} map plot saved to {stdfigname}")
+    verbose_print(verbose, f"{galname} {fig_keyword} map plot saved to {stdfigname}")
 
 
 
     ## custom
-    vmin = kwargs.get('vmin',None)
-    vmax = kwargs.get('vmax',None)
+    vmin = kwargs.get('vmin', None)
+    vmax = kwargs.get('vmax', None)
 
-    if vmin or vmax:
-        stdcustfigname = os.path.join(figpath, f"{figname}-custom-map.{figext}")
+    if vmin is not None or vmax is not None:
+        stdcustfigname = os.path.join(fig_save_path, f"{figname}-custom-map.{figext}")
+        plt.figure()
         im = plt.imshow(plotmap,cmap=cmap,vmin=vmin,vmax=vmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
-        plt.xlabel(r'$\alpha$ (arcsec)')
-        plt.ylabel(r'$\delta$ (arcsec)')
+        plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+        plt.ylabel(r'$\Delta \delta$ (arcsec)')
         ax = plt.gca()
         ax.set_facecolor('lightgray')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("top", size="5%", pad=0.01)
 
         cbar = plt.colorbar(im,cax=cax,orientation = 'horizontal')
-        cbar.set_label(value_string,fontsize=15,labelpad=-45)
+        cbar.set_label(value_string,fontsize=15,labelpad=-55)
         cax.xaxis.set_ticks_position('top')
         
-        plt.savefig(stdcustfigname,bbox_inches='tight',dpi=dpi)
+        plt.savefig(stdcustfigname,bbox_inches='tight')
         plt.close()
-        logger.info(f"{galname} {fig_keyword} custom map plot saved to {stdcustfigname}")
+        verbose_print(verbose, f"{galname} {fig_keyword} custom map plot saved to {stdcustfigname}")
 
-    if errormap:
-        errormapfigname = os.path.join(figpath, f"{figname}-map-error.{figext}")
-        vmin = np.median(errormap[~mask]) - s * np.std(errormap[~mask])
-        vmax = np.median(errormap[~mask]) + s * np.std(errormap[~mask])
-        error_string = rf"$\sigma_{{{label}}}$ {units}"
-
-        errormap[mask] = np.nan
-        im = plt.imshow(errormap,cmap=cmap,vmin=vmin,vmax=vmax,origin='lower',
+    if errormap is not None:
+        errormask = np.logical_or(image_mask, errormap<0)
+        errormapfigname = os.path.join(fig_save_path, f"{figname}-map-error.{figext}")
+        evmin = 0
+        evmax = np.median(errormap[~errormask]) + 1 * np.std(errormap[~errormask])
+        error_string = r"$\sigma_{" + label[1:-1] + "}\ " + units[1:-1] + "$"
+        
+        errormap[errormask] = np.nan
+        plt.figure()
+        im = plt.imshow(errormap,cmap=cmap,vmin=evmin,vmax=evmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
-        plt.xlabel(r'$\alpha$ (arcsec)')
-        plt.ylabel(r'$\delta$ (arcsec)')
+        plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+        plt.ylabel(r'$\Delta \delta$ (arcsec)')
         ax = plt.gca()
         ax.set_facecolor('lightgray')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("top", size="5%", pad=0.01)
 
         cbar = plt.colorbar(im,cax=cax,orientation = 'horizontal')
-        cbar.set_label(error_string,fontsize=15,labelpad=-45)
+        cbar.set_label(error_string,fontsize=15,labelpad=-55)
         cax.xaxis.set_ticks_position('top')
-        
-        plt.savefig(errormapfigname,bbox_inches='tight',dpi=dpi)
+        plt.savefig(errormapfigname,bbox_inches='tight')
         plt.close()
-        logger.info(f"{galname} {fig_keyword} uncertainty map plot saved to {stdcustfigname}")
+        verbose_print(verbose,f"{galname} {fig_keyword} uncertainty map plot saved to {errormapfigname}")
         
 
 
@@ -287,6 +284,4 @@ def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keywor
     print(f"BOKEH plot saved to {out_fname}")
 
 def plot_local_maps(mapsfil, verbose = True):
-    logger = verbose_logger(verbose=verbose)
-    hdul = fits.open(mapsfil)
     mapkeys = [field for field in hdul.keys() if 'MAP' in field.split('_')]

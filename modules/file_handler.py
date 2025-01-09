@@ -1,13 +1,15 @@
 from astropy.io import fits
 import os
+import re
+from datetime import datetime
 from glob import glob
 import numpy as np
-import util
-import time
-import sys
-import defaults
+import modules.defaults as defaults
+import modules.util as util
 import warnings
 import configparser
+from datetime import datetime
+from modules.util import verbose_print
 
 # TODO: update the docstring, add verbose printing, add better bc/nc option
 
@@ -17,7 +19,7 @@ import configparser
 # 
 # 
 
-def init_datapaths(galname, bin_method, verbose=False):
+def init_datapaths(galname, bin_method, verbose=True):
     """
     Acquires the path(s) to the primary file(s) of a given galaxy by request.
 
@@ -39,37 +41,41 @@ def init_datapaths(galname, bin_method, verbose=False):
 
         **Dictionary Structure**:
 
-        • **'CONFIG'** (str): Path to the `.ini` configuration file.
+        • 'CONFIG' (str): Path to the `.ini` configuration file.
 
-        • **'NO-CORR'** (dict): Dictionary with filepaths for non-corrected data:
+        • 'NO-CORR' (dict): Dictionary with filepaths for non-corrected data:
         
             - 'LOGCUBE' (str): Path to the non-corrected logcube file.
             - 'MAPS' (str): Path to the non-corrected maps file.
 
-        • **'BETA-CORR'** (dict): Dictionary with filepaths for beta-corrected data:
+        • 'BETA-CORR' (dict): Dictionary with filepaths for beta-corrected data:
 
             - 'LOGCUBE' (str): Path to the beta-corrected logcube file.
             - 'MAPS' (str): Path to the beta-corrected maps file.
-            - 'MCMC' (list): List of paths for MCMC results.
+            - 'MCMC' (list): List of paths to MCMC results.
             - 'LOCAL' (str): Path to the locally corrected data.
 
         **Note**: If a file does not exist, its value in the dictionary will be `None`.
     """
-    util.verbose_print(verbose, f"Acquiring relevant files for {galname}-{bin_method}")
+
+    verbose_print(verbose, f"Acquiring relevant files for {galname}-{bin_method}")
     ## initialize paths to the data directory and relevant subdirectories
-    repopath = defaults.get_default_path()
-    datapath = os.path.join(os.path.dirname(repopath))
+    datapath = defaults.get_default_path('data')
 
     galsubdir = f"{galname}-{bin_method}"
+    analysisplan = defaults.analysis_plans()
+    corr_key = 'BETA-CORR'
 
-    dappath = os.path.join(datapath, "DAP_outputs", galsubdir)
-    mcmcpath = os.path.join(datapath, "MCMC_outputs", galsubdir)
-    musecubepath = os.path.join(datapath, "MUSE_cubes", galname)
-    localdatapath = os.path.join(datapath, "LOCAL_outputs", galsubdir)
+    dappath = os.path.join(datapath, "dap_outputs", galsubdir, corr_key, f"{bin_method}-{analysisplan}")
+    mcmcpath = os.path.join(datapath, "mcmc_outputs", galsubdir, corr_key, analysisplan)
+    musecubepath = os.path.join(datapath, "muse_cubes", galname)
+    localdatapath = os.path.join(datapath, "local_outputs", galsubdir, corr_key, analysisplan)
 
     outdict = {'CONFIG':None, 
-               'NO-CORR':{'LOGCUBE':None, 'MAPS':None}, 
-               'BETA-CORR':{'LOGCUBE':None, 'MAPS':None, 'MCMC':None, 'LOCAL':None}}
+               'LOGCUBE':None, 
+               'MAPS':None, 
+               'MCMC':None, 
+               'LOCAL':None}
     
     ### CONFIG file
     configfils = glob(os.path.join(musecubepath, "*.ini"))
@@ -81,48 +87,76 @@ def init_datapaths(galname, bin_method, verbose=False):
             warnings.warn(f"{musecubepath} has more than one config file:\n{configfils} \nDefaulting to {configfils[0]}")
 
         outdict['CONFIG'] = configfils[0]
+        verbose_print(verbose, f"Using CONFIG File: {configfils[0]}")
 
     ### DAP files
     if not os.path.exists(dappath):
         util.verbose_warning(verbose,f"Filepath does not exist: {dappath}")
     else:
-        dapdirfils = glob(os.path.join(dappath, "**", "*.fits"), recursive=True)
-        if len(dapdirfils) != 0:
-            for fil in dapdirfils:
+        beta_corr_fils = glob(os.path.join(dappath, "**", "*.fits"), recursive=True)
+        if len(beta_corr_fils) != 0:
+            for fil in beta_corr_fils:
                 if 'LOGCUBE' in fil:
-                    if 'NO-CORR' in fil:
-                        outdict['NO-CORR']['LOGCUBE'] = fil
-                    elif 'BETA-CORR' in fil:
-                        outdict['BETA-CORR']['LOGCUBE'] = fil
-
+                    outdict['LOGCUBE'] = fil
+                    verbose_print(verbose, f"Using LOGCUBE File: {fil}")
                 if 'MAPS' in fil:
-                    if 'NO-CORR' in fil:
-                        outdict['NO-CORR']['MAPS'] = fil
-                    elif 'BETA-CORR' in fil:
-                        outdict['BETA-CORR']['MAPS'] = fil
+                    outdict['MAPS'] = fil
+                    verbose_print(verbose, f"Using MAPS File: {fil}")
         else:
-            util.verbose_warning(verbose, f"No DAP files found in {dapdirfils}")
+            util.verbose_warning(verbose, f"No LOGCUBE or MAPS found in {dappath}")
+
 
     ### MCMC files
     if not os.path.exists(mcmcpath):
         util.verbose_warning(verbose,f"Filepath does not exist: {mcmcpath}")
-
     else:
-        mcmcfils = glob(os.path.join(mcmcpath, "**", "*.fits"), recursive=True)
-        if len(mcmcfils) != 0:
-            outdict['BETA-CORR']['MCMC'] = mcmcfils
+        mcmc_subdirs = [d for d in os.listdir(mcmcpath) if os.path.isdir(os.path.join(mcmcpath, d))]
+        if len(mcmc_subdirs)==0:
+            util.verbose_warning(verbose, f"Empty directory: {mcmcpath}")
+        
+        elif len(mcmc_subdirs)==1:
+            mcmc_rundir = os.path.join(mcmcpath, mcmc_subdirs[0])
+            mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
+            verbose_print(verbose, f"Using {len(mcmc_files)} MCMC Files found in: {mcmc_rundir}")
+
         else:
-            util.verbose_warning(verbose, f"No MCMC files found in {mcmcpath}")
+            dated_dirs = []
+            pattern = re.compile(r"^Run_(\d{4}-\d{2}-\d{2})$")
+            for subdir in mcmc_subdirs:
+                match = pattern.match(subdir)
+                if match:
+                    date_str = match.group(1)
+                    try:
+                        date = datetime.strptime(date_str, "%Y-%m-%d")
+                        dated_dirs.append((subdir, date))
+                    except ValueError:
+                        pass  # Ignore invalid date formats
+
+            # Find the subdirectory with the most recent date
+            if dated_dirs:
+                most_recent_dir = max(dated_dirs, key=lambda x: x[1])
+                print("Most recent subdirectory:", most_recent_dir[0])
+                mcmc_rundir = os.path.join(mcmcpath, most_recent_dir[0])
+                mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
+                verbose_print(verbose, f"Using {len(mcmc_files)} MCMC Files found in: {mcmc_rundir}")
+            else:
+                print("No valid 'Run_YYYY-MM-DD' subdirectories found.")
+
+        outdict['MCMC'] = mcmc_files
+
+
 
     ### LOCAL file
     if not os.path.exists(localdatapath):
         util.verbose_warning(verbose,f"Filepath does not exist: {localdatapath}")
     else:
-        localfil = glob(os.path.join(localdatapath, ".fits"))
-        if len(localfil) == 0:
+        localfils = glob(os.path.join(localdatapath, "*.fits"))
+        if len(localfils) == 0:
             util.verbose_warning(verbose,f"No local data file found in {localdatapath}")
         else:
-            outdict["BETA-CORR"]['LOCAL'] = localfil[0]
+            outdict['LOCAL'] = localfils
+            for file in localfils:
+                verbose_print(verbose, f"Using LOCAL File: {file}")
 
     return outdict
 
@@ -150,7 +184,6 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
         - "data" : Standard data header for the map.
         - "err"  : Header for the error/uncertainty data.
         - "mask" : Header for the mask data.
-        - "qual" : Header for the quality flags data.
 
     Returns
     -------
@@ -164,16 +197,13 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
     The structure of the returned dictionary depends on the value of the `flag` parameter:
 
     - **For "data"**: 
-      Includes fields like "DESC", "BUNIT", "ERRDATA", "QUALDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
+      Includes fields like "DESC", "BUNIT", "ERRDATA", "QUALDATA", "EXTNAME", and "AUTHOR".
     
     - **For "err"**:
-      Includes fields like "BUNIT", "DATA", "QUALDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
+      Includes fields like "BUNIT", "DATA", "QUALDATA", "EXTNAME", and "AUTHOR".
     
     - **For "mask"**:
-      Includes fields like "ERRDATA", "FLAGDATA", "EXTNAME", and "AUTHOR".
-    
-    - **For "qual"**:
-      Includes quality flag descriptions ("FLG_1", "FLG_0", etc.), "ERRDATA", "QUALDATA", "EXTNAME", and "AUTHOR".
+      Includes fields like "ERRDATA", "EXTNAME", and "AUTHOR".
 
     The function assigns appropriate extension names, data descriptions, and associated metadata 
     based on the type of data (`flag`).
@@ -191,7 +221,6 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
             "BUNIT":(unit_str, "Unit of pixel value"),
             "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
             "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "FLAGDATA":(f"{HDU_keyword}_FLAG", "Associated quality flags extension"),
             "EXTNAME":(HDU_keyword, "extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
@@ -201,31 +230,24 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
             "BUNIT":(unit_str, "Unit of pixel value"),
             "DATA":(HDU_keyword, "Associated data extension"),
             "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "FLAGDATA":(f"{HDU_keyword}_FLAG", "Associated quality flags extension"),
             "EXTNAME":(f"{HDU_keyword}_ERR", "extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
     elif flag == "mask":
-        header = {
-            "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
-            "FLAGDATA":(f"{HDU_keyword}_FLAG", "Associated quality extension"),
-            "EXTNAME":(f"{HDU_keyword}_MASK", "extension name"),
-            "AUTHOR":("Andrew Pitts","")
-        }
-    
-    elif flag == "qual":
         quality = defaults.local_quality_flag()
         header = {
-            "FLG_1":(quality[1],"Description of quality flag of 1"),
-            "FLG_0":(quality[0],"Description of quality flag of 0"),
-            "FLG_-1":(quality[-1],"Description of quality flag of -1"),
-            "FLG_-2":(quality[-2],"Description of quality flag of -2"),
-            "FLG_-3":(quality[-3],"Description of quality flag of -3"),
-            "FLG_-4":(quality[-4],"Description of quality flag of -4"),
+            "DATA":("","Data Quality Bitmask"),
+            "Bit_0":(quality[0],"Description of bitmask 0"),
+            "Bit_1":(quality[1],"Description of bitmask 1"),
+            "Bit_2":(quality[2],"Description of bitmask 2"),
+            "Bit_3":(quality[3],"Description of bitmask 3"),
+            "Bit_4":(quality[4],"Description of bitmask 4"),
+            "Bit_5":(quality[5],"Description of bitmask 5"),
+            "Bit_6":(quality[6],"Description of bitmask 6"),
+            "Bit_7":(quality[7],"Description of bitmask 6"),
             "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
-            "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "EXTNAME":(f"{HDU_keyword}_FLAG", "extension name"),
+            "EXTNAME":(f"{HDU_keyword}_MASK", "extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
@@ -276,19 +298,80 @@ def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
     """
     
     standard_dict = {}
-    keywords = [HDU_keyword, f"{HDU_keyword}_MASK", f"{HDU_keyword}_ERROR", f"{HDU_keyword}_FLAG"]
-    flags = ["data","mask","err","qual"]
+    keywords = [HDU_keyword, f"{HDU_keyword}_MASK", f"{HDU_keyword}_ERROR"]
+    flags = ["data","mask","err"]
 
     for keyword, mapdata, flag in zip(keywords, mapdict.values(), flags):
-        standard_header_dict = standard_header_dict(galname, HDU_keyword, unit_str, flag)
-        standard_dict[keyword] = (mapdata, standard_header_dict)
+        standard_header = standard_header_dict(galname, HDU_keyword, unit_str, flag)
+        standard_dict[keyword] = (mapdata, standard_header)
 
     return standard_dict
 
 
 def header_dict_formatter(header_dict):
     """
-    ...
+    Formats a dictionary of FITS header keywords, ensuring each card adheres to the 80-character limit.
+
+    Parameters
+    ----------
+    header_dict : dict
+        Dictionary of {str: tuple} where:
+        - `key`: str, FITS keyword (max 8 characters).
+        - `value`: object, value associated with the keyword.
+        - `comment`: str, description/comment about the value.
+
+    Returns
+    -------
+    dict
+        A formatted dictionary ready for FITS headers, ensuring compliance with the 80-character rule.
+    """
+
+    def card_builder(key, value, comment):
+        """
+        Build an initial FITS header card string.
+        """
+        return f"{key[:8].ljust(8)}= {str(value).rjust(20)} / {comment}"
+
+    reformat_dict = {}
+
+    for key, header_instance in header_dict.items():
+        # Ensure the key is max 8 characters
+        key = key[:8]
+
+        if not isinstance(header_instance, tuple):
+            header_instance = (header_instance, '')
+
+        value, comment = header_instance
+
+        # Build the initial card
+        card = card_builder(key, value, comment)
+
+        if len(card) <= 80:
+            # If card fits within 80 chars, keep it as is
+            reformat_dict[key] = (value, comment)
+        else:
+            # Split into key=value and comment
+            key_value_part = f"{key[:8].ljust(8)}= {str(value).rjust(20)}"
+            remaining_comment = f" / {comment}"
+            
+            # Handle first 80 characters
+            first_line = (key_value_part + remaining_comment)[:80]
+            reformat_dict[key] = (value, first_line.split('/ ', 1)[-1])
+            
+            # Handle overflow in comments
+            overflow_comment = remaining_comment[len(first_line) - len(key_value_part):].strip()
+            while len(overflow_comment) > 0:
+                next_chunk = overflow_comment[:72]  # Reserve space for "COMMENT "
+                overflow_comment = overflow_comment[72:]
+                reformat_dict['COMMENT'] = next_chunk.strip()
+
+    return reformat_dict
+
+
+
+def header_dict_formatter_old(header_dict):
+    """
+    ...f
 
     Parameters
     ----------
@@ -329,7 +412,8 @@ def header_dict_formatter(header_dict):
         card = card_builder(key,value,comment)
 
         if len(card)>80:
-            split_comment = card[:80].split('/ ')[1]
+            split_card = card[:80].split('/ ',)
+            split_comment = split_card[0]
             remainder = card[80:]
             reformat_dict[key] = (value, split_comment)
             reformat_dict['COMMENT'] = remainder
@@ -340,7 +424,40 @@ def header_dict_formatter(header_dict):
     return reformat_dict
 
 
-def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbose = False):
+def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True, verbose = False):
+    util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
+
+    filename = f"{galdir}-{filename}.fits"
+    full_path = os.path.join(filepath, filename)
+
+    if os.path.isfile(full_path):
+        if overwrite:
+            os.remove(full_path)
+        else:
+            current_files = [f for f in os.listdir(filepath) if not f.startswith('.')]
+            n = len(current_files)
+            padded_number = str(n).zfill(3)
+            base_name, ext = os.path.splitext(filename)
+            filename = f"{base_name}-{padded_number}{ext}"
+            full_path = os.path.join(filepath, filename)
+    
+
+    hdul = fits.HDUList([fits.PrimaryHDU()])  # Start with a Primary HDU
+    for name, (data, header_dict) in maps_dict.items():
+        header_dict = header_dict_formatter(header_dict)
+        if not isinstance(data, np.ndarray) or data.ndim != 2:
+            raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
+        
+        new_hdu = fits.ImageHDU(data=data, name=name)
+        # Add header information if provided
+        for key, value in header_dict.items():
+            new_hdu.header[key] = value
+        hdul.append(new_hdu)
+
+    hdul.writeto(full_path, overwrite=True)
+    print(f"Created new FITS file '{full_path}'")
+
+def map_file_handler(galdir, maps_dict, filepath, overwrite = True, verbose = False):
     """
     Update or create a FITS file with specified image HDUs and optional headers.
     
@@ -366,8 +483,8 @@ def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbo
             numpy.ndarray image. See `astropy.io.fits` [FITS Headers Documentation](https://docs.astropy.org/en/latest/io/fits/usage/headers.html) for 
             additional information.
 
-    filepath : str, optional
-        Optionally specify a full filepath of the FITS file to be written including the filename.
+    filepath : str
+        Specify a full filepath of the FITS file to be written including the filename.
     
     overwrite : bool, optional
         Default `True` specifying to write into the already existing FITS file if it exists,
@@ -412,54 +529,51 @@ def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbo
 
     """
 
-    if filepath is None:
-        rootpath = defaults.get_default_path()
-        base_name = f"{galdir}-local-MAPS.fits"
-        filepath = os.path.join(os.path.dirname(rootpath),"data/local_outputs", galdir, base_name)
-    
-    full_path = os.path.dirname(filepath)
-    file_name = os.path.basename(filepath)
-    util.check_filepath(full_path, mkdir = True, verbose = verbose, error = True)
+    util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
+
+    file_name = f"{galdir}-local-maps.fits"
+    full_path = os.path.join(filepath, file_name)
 
     # if overwrite and the FITS file exists
-    if overwrite and os.path.exists(filepath):
+    if overwrite and os.path.isfile(full_path):
         # Open the existing file in update mode
-        with fits.open(filepath, mode='update') as hdul:
+        with fits.open(full_path, mode='update') as hdul:
+            new_hdul = fits.HDUList()
+
             # Track existing HDU names
             existing_names = {hdu.name for hdu in hdul if isinstance(hdu, fits.ImageHDU)}
             i=0
+
             for name, (data, header_dict) in maps_dict.items():
                 header_dict = header_dict_formatter(header_dict)
                 if not isinstance(data, np.ndarray) or data.ndim != 2:
                     raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
-                
-                if name in existing_names:
-                    # Overwrite data for existing HDU with this name
-                    hdu = hdul[name]
-                    hdu.data = data
-                    
-                    # Update the header with the provided header dictionary
-                    for key, value in header_dict.items():
-                        hdu.header[key] = value
 
-                else:
-                    # Append a new ImageHDU if it doesn't already exist
-                    new_hdu = fits.ImageHDU(data=data, name=name)
-                    for key, value in header_dict.items():
-                        new_hdu.header[key] = value
-                    hdul.append(new_hdu)
+                # Create a new HDUList preserving order and replacing matching HDUs
+                new_hdul = fits.HDUList()
 
+                for hdu in hdul:
+                    if isinstance(hdu, fits.ImageHDU) and hdu.name == name:
+                        # Replace the HDU with the new one
+                        updated_hdu = fits.ImageHDU(data=data, name=name)
+                        for key, value in header_dict.items():
+                            updated_hdu.header[key] = value
+                        new_hdul.append(updated_hdu)
+                    else:
+                        # Keep the existing HDU unchanged
+                        new_hdul.append(hdu)
 
-                dots = '.' * ((i % 3) + 1)
-                print(f"Writing data to {filepath} {i+1}/{len(data)}{dots}", end='\r')
-                i+=1
+                # Clear the original HDUList and replace it with the new one
+                hdul.clear()
+                hdul.extend(new_hdul)
+
+                print(f"Writing data to HDUL...")
             hdul.flush()  # Save changes
             print("Done!       ")
-            print(f"Data saved to {filepath}")
+            print(f"Data saved to {full_path}")
     else:
         # Create a new FITS file with the given HDUs
         hdul = fits.HDUList([fits.PrimaryHDU()])  # Start with a Primary HDU
-        i=0
         for name, (data, header_dict) in maps_dict.items():
             header_dict = header_dict_formatter(header_dict)
             if not isinstance(data, np.ndarray) or data.ndim != 2:
@@ -471,19 +585,16 @@ def map_file_handler(galdir, maps_dict, filepath = None, overwrite = True, verbo
                 new_hdu.header[key] = value
             hdul.append(new_hdu)
 
-            dots = '.' * ((i % 3) + 1)
-            print(f"Writing data to new FITS file {i+1}/{len(data)}{dots}", end='\r')
-            i+=1
-        print("Done!     ")
-        
-        if os.path.exists(filepath):
-            fileslist = glob(os.path.join(full_path, "*.fits"))
+        current_files = [f for f in os.listdir(filepath) if not f.startswith('.')]
+        if len(current_files)>0:
+            fileslist = glob(os.path.join(filepath, "*.fits"))
             n = len(fileslist)
             padded_number = str(n).zfill(3)
-            file_name += padded_number
-            filepath = os.path.join(full_path, file_name)
+            base_name, ext = os.path.splitext(file_name)
+            file_name = f"{base_name}-{padded_number}{ext}"
+            full_path = os.path.join(filepath, file_name)
 
-        hdul.writeto(filepath, overwrite=True)
+        hdul.writeto(full_path, overwrite=True)
         print(f"Created new FITS file '{filepath}'.")
 
 # 
@@ -584,3 +695,21 @@ def clean_ini_file(input_file, overwrite=False):
                     file.write(f"{line} = value\n")
 
     print("Done.")
+
+
+
+
+### old location map_file_handler
+# if name in existing_names:
+#     # Overwrite data for existing HDU with this name
+#     hdu = hdul[name]
+#     hdu.data = data
+#     # Update the header with the provided header dictionary
+#     for key, value in header_dict.items():
+#         hdu.header[key] = value
+# else:
+#     # Append a new ImageHDU if it doesn't already exist
+#     new_hdu = fits.ImageHDU(data=data, name=name)
+#     for key, value in header_dict.items():
+#         new_hdu.header[key] = value
+#     hdul.append(new_hdu)

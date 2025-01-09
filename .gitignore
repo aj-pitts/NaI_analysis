@@ -8,4 +8,5 @@ plot_inspect/
 *~
 \#*#
 Testing.ipynb
-.vscode
+make_plots.ipynb
+__pycache__

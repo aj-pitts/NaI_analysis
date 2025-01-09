@@ -1,14 +1,11 @@
-import configparser
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 from glob import glob
 import warnings
 import logging
-import inspect
 from astropy.io import fits
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import defaults
 
 def check_filepath(filepath, mkdir=True, verbose=True, error=True):
     """
@@ -41,10 +38,8 @@ def check_filepath(filepath, mkdir=True, verbose=True, error=True):
     for path in filepath:
         if not os.path.exists(path):
             if mkdir:
-                if '.' in path:
-                    raise ValueError(f"Filepath cannot contain extensions. {filepath}")
                 verbose_print(verbose, f"Creating filepath: {path}")
-                os.mkdir(path)
+                os.makedirs(path)
             else:
                 if error:
                     raise ValueError(f"'{path}' does not exist")
@@ -52,93 +47,106 @@ def check_filepath(filepath, mkdir=True, verbose=True, error=True):
                     verbose_warning(verbose, f"'{path}' does not exist")
 
 
-def check_bin_ID(spatial_ID, binmaps, stellar_velocity_map = None, stellar_vel_mask = None, s = 5, 
-                 return_int = True):
+def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 5):
     """
-    Takes in a spatial bin ID and checks it agains the `BINID` DAP bin maps to check whether
-    a bin should be used for analysis.
+    Check whether a spatial bin should be included in analysis based on DAP bin maps, 
+    masking criteria, and stellar velocity properties.
 
-    First order checks on whether or not analyze a given bin based on the DAP's `BINID` output. The
-    function returns an integer flag based on the results of its checks. Optionally adjust the
-    `return_int` parameter to allow the function to return a bool instead. An input bin ID
-    `spatial_ID` which should not be used for analysis is "flagged". A bin is flagged if the bin is 
-    masked by the stellar model fitting results or emission line model fitting results. 
-    Optionally include the stellar velocity map and/or the stellar velocity mask parameters to flag
-    a bin where its stellar velocity masked or is `s` number of standard deviations away from the
-    median.
+    This function evaluates a given spatial bin (`spatial_ID`) against the DAP's `BINID` output, 
+    optional masking maps, and stellar velocity constraints to determine if the bin should 
+    be excluded from analysis. The bin is flagged if it meets masking criteria, falls outside 
+    an acceptable range of stellar velocities, or is otherwise marked invalid in the data.
 
     Parameters
     ----------
     spatial_ID : int
-        Integer identifier of the spatial bin to be checked; from extension 0 of the `BINID` 
-        object output by the DAP.
+        Integer identifier of the spatial bin to be checked, corresponding to a value in the 
+        `BINID` map from the DAP.
 
-    binmaps : np.ndarray
-        `BINID` datacube object output by the DAP. Should contain all five extensions of Bin 
-        identifiers.
+    binid_map : np.ndarray
+        Two-dimensional array representing the `BINID` extension 0 map from the DAP, which defines 
+        spatial bin assignments.
+
+    DAPPIXMASK_list : list of np.ndarray, optional
+        List of two-dimensional arrays representing pixel-level masks from the DAP 
+        (`PIXMASK`). These arrays indicate specific reasons a bin may be invalid.
 
     stellar_velocity_map : np.ndarray, optional
-        Two dimensional array of line-of-sight stellar velocities; `STELLAR_VEL` from the DAP 
-        MAPS file.
-
-    stellar_vel_mask : np.ndarray, optional
-        Two dimensional array of integer values for masking the stellar velocities; 
-        `STELLAR_VEL_MASK` field from the DAP MAPS file.
+        Two-dimensional array containing stellar velocity data (`STELLAR_VEL`) from the DAP.
 
     s : int, optional
-        The number of standard deviations above and below the median stellar velocity which is 
-        accepted by the check.
-
-    return_int : bool, optional
-        Determines the return type. If `True`, the function returns an integer value corresponding
-        to nature of the flagging. If False, it returns a boolean indicating whether or not the
-        input bin is flagged. Default is True.
+        Number of standard deviations from the median stellar velocity allowed for a bin to 
+        remain valid. Default is 5.
 
     Returns
     -------
-    int or bool
-        If `return_int` is `True`:
-            - 1: The bin was not flagged by any input and is good to be used.
-            - 0: The bin was flagged by either the stellar model results, the emission line model
-            results.
-            - -1: The bin was flagged by the data quality mask for the stellar velocity results.
-            - -2: The stellar velocity of the bin was not flagged, but exceeds `s` standard 
-            deviations beyond the median of the distribution of velocities.
-
-        If `return_int` is `False`:
-            - True: If the bin was not flagged by any of the checks and is good to use.
-            - False: If the bin was flagged and should not be used in analysis.
+    int
+        A flag indicating the bin's validity:
         
+        - **0**: Bin passed all checks and is valid for analysis.  
+        - **1**: Bin flagged due to pixel-level masking (`DAPPIXMASK_list`).   
+        - **2**: Bin's stellar velocity exceeds `s` standard deviations from the median.  
+
+    Notes
+    -----
+    - If `stellar_velocity_map` is provided, the bin's stellar velocity is compared against the 
+      median ± `s` standard deviations.
+    - If masking arrays are provided, the function checks each bin against specified mask criteria.
     """
-    stellar_vel_mask = stellar_vel_mask.astype(bool)
-    spatial_bins = binmaps[0]
-    stellar_model_results = binmaps[1]
-    emline_model_results = binmaps[3]
+    w = spatial_ID == binid_map
 
-    w = spatial_ID == spatial_bins
-    ## if bad stellar model or emline fits, skip the spaxel
-    if stellar_model_results[w][0] < 0 or emline_model_results[w][0] < 0:
-        if not return_int:
-            return False
-        return 0
+    if stellar_velocity_map is not None:
+        median = np.median(stellar_velocity_map[np.isfinite(stellar_velocity_map)])
+        std = np.std(stellar_velocity_map[np.isfinite(stellar_velocity_map)])
 
-    ## if stellar kinematics are masked, skip the spaxel
-    if stellar_vel_mask:
-        if not stellar_vel_mask[w][0]:
-            if not return_int:
-                return False
-            return -1
+        sv = np.median(stellar_velocity_map[w])
 
-    if stellar_velocity_map:
-        sv_bin_mask = np.logical_or(w, stellar_vel_mask)
-        if abs(stellar_velocity_map[sv_bin_mask][0]) > 5 * np.std(stellar_velocity_map[stellar_vel_mask]) + np.median(stellar_velocity_map[stellar_vel_mask]):
-            if not return_int:
-                return False
-            return -2
-        
-    if not return_int:
-        return True
-    return 1
+        threshold = s * std + median
+        if abs(sv) > threshold:
+            return 2
+
+    if DAPPIXMASK_list is not None:
+        dappix_bits = [4, 5, 6, 7, 8, 10, 30]
+        for mask_map in DAPPIXMASK_list:
+            mask_list = mask_map[w]
+            for bitmask in mask_list:
+                if bitmask in dappix_bits:
+                    return 1
+    return 0
+
+def spec_mask_handler(DAPSPECMASK):
+    """
+    Process DAP spectral mask values and flag bins based on predefined bitmask criteria.
+
+    This function evaluates each bit in the `DAPSPECMASK` array and flags it based on 
+    whether it falls within a specific range. Bits with values less than or equal to 9 
+    are flagged as invalid (1), while all other bits are considered valid (0).
+
+    See the `DAP Metadata Model <https://sdss-mangadap.readthedocs.io/en/latest/metadatamodel.html#metadatamodel-dapspecmask>`_.
+
+    Parameters
+    ----------
+    DAPSPECMASK : array-like
+        Array of integer bitmask values from the DAP spectral mask (`SPECMASK`), where each 
+        value represents a specific data quality flag.
+
+    Returns
+    -------
+    np.ndarray
+        A binary mask array of the same length as `DAPSPECMASK`:
+        - **1**: Indicates the corresponding bit is flagged (invalid for analysis).  
+        - **0**: Indicates the corresponding bit is valid for analysis.
+
+    Notes
+    -----
+    - Bits with values <= 9 are considered flagged based on DAP mask criteria.
+    - The returned array can be used for filtering or masking spectral data during analysis.
+    """
+    mask = np.zeros_like(DAPSPECMASK)
+    w = (DAPSPECMASK <=9) & (DAPSPECMASK>=2)
+
+    mask[w] = 1
+    return mask
 
 def verbose_print(verbose, *args, **kwargs):
     """
