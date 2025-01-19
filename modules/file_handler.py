@@ -457,7 +457,109 @@ def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True,
     hdul.writeto(full_path, overwrite=True)
     print(f"Created new FITS file '{full_path}'")
 
-def map_file_handler(galdir, maps_dict, filepath, overwrite = True, verbose = False):
+
+def map_file_handler(galdir, maps_dict, filepath, verbose = False):
+    """
+    Handles the creation and updating of a FITS file containing galaxy map data.
+
+    This function creates or updates a FITS file named `<galdir>-local-maps.fits` 
+    in the specified `filepath`. If the file does not exist, it initializes a new
+    FITS file with the data provided in `maps_dict`. If the file exists, it updates
+    the data for existing extensions or adds new extensions as needed. The function
+    also timestamps the header of updated or newly added extensions.
+
+    Parameters
+    ----------
+    galdir : str
+        The name of the galaxy directory, used to construct the FITS filename.
+    maps_dict : dict
+        A dictionary containing the map data and header information. 
+        Keys are extension names (EXTNAME), and values are tuples of the form 
+        `(data, header_dict)`, where:
+        - `data` is a 2D NumPy array containing the map data.
+        - `header_dict` is a dictionary of header keyword-value pairs.
+    filepath : str
+        The directory where the FITS file should be created or updated.
+    verbose : bool, optional
+        If True, prints messages about the process (default is False).
+
+    Notes
+    -----
+    - The function ensures the FITS file contains a Primary HDU.
+    - The `UPDATE` keyword in the header is used to record the timestamp 
+      of the last modification for updated or new extensions.
+    - Duplicate extension names in `maps_dict` are not allowed.
+
+    Examples
+    --------
+    >>> galdir = "galaxy1"
+    >>> maps_dict = {
+    ...     "EXT1": (np.random.random((100, 100)), {"KEY1": "VALUE1"}),
+    ...     "EXT2": (np.random.random((200, 200)), {"KEY2": "VALUE2"})
+    ... }
+    >>> filepath = "/path/to/directory"
+    >>> map_file_handler(galdir, maps_dict, filepath, verbose=True)
+    Created new FITS file: /path/to/directory/galaxy1-local-maps.fits
+
+    Raises
+    ------
+    ValueError
+        If `maps_dict` is empty or contains duplicate extension names.
+    """
+
+    # check if the filepath exists
+    util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
+
+    # init the filename and fullpath to the output file
+    file_name = f"{galdir}-local-maps.fits"
+    full_path = os.path.join(filepath, file_name)
+
+    # timestamp for the header
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # init a new HDU list and write the maps data into it
+    new_hdul = fits.HDUList([])
+
+    for name, (data, header_dict) in maps_dict.items():
+        header_dict_formatted = header_dict_formatter(header_dict=header_dict)
+        image_hdu = fits.ImageHDU(data=data, name=name)
+
+        for key, value in header_dict_formatted.items():
+            image_hdu.header[key] = value
+
+        image_hdu.header = (timestamp, "Last updated timestamp")
+        new_hdul.append(image_hdu)
+
+
+
+    # if the file is not already made, write it with the mapsdict data
+    if not os.path.isfile(full_path):
+        new_hdul.insert(0, fits.PrimaryHDU())
+        new_hdul.writeto(full_path)
+    
+    # if the file exists, open it in update mode
+    else:
+        with fits.open(full_path, mode='update') as existing_hdul:
+            # grab the extnames from the new hdu
+            existing_names = [hdu.name for hdu in existing_hdul]
+
+            # iterate through the new HDU list.
+            for new_hdu in new_hdul:
+                extname = new_hdu.name
+
+                # If an HDU in the new list matches the existing data names, update the existing data with the new data
+                if extname in existing_names:
+                    existing_hdul[extname].data = new_hdu.data
+                    existing_hdul[extname].header['UPDATE'] = (timestamp, "Last updated timestamp")
+                
+                # otherwise, append the new data into the file
+                else:
+                    existing_hdul.append(new_hdu)
+            existing_hdul.flush(verbose=verbose)
+
+
+
+def map_file_handler_old(galdir, maps_dict, filepath, overwrite = True, verbose = False):
     """
     Update or create a FITS file with specified image HDUs and optional headers.
     
