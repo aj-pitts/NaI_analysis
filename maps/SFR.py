@@ -5,12 +5,13 @@ from astropy.table import Table, join
 from glob import glob
 import os
 import argparse
+import warnings
 from tqdm import tqdm
 import astropy.units as u
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.coordinates import Angle
 
-from modules import util, plotter, file_handler, defaults
+from modules import defaults, util, file_handler, plotter
 
 ## TODO: add detailed docstrings and comments
 
@@ -47,14 +48,8 @@ def correct_dust(F_Ha, F_Hb, HaHb_ratio = 2.87, Rv = 3.1, k_Ha = 2.45, k_Hb = 3.
     -----
     This function corrects the observed H-alpha flux for dust attenuation based on 
     the observed H-alpha to H-beta flux ratio and a theoretical ratio (`HaHb_ratio`).
-    It uses the Cardelli, Clayton, and Mathis (1989) extinction law by default, 
-    where the dust attenuation in magnitudes is calculated using:
-
-    .. math::
-        E(B-V) = \frac{2.5}{k_{H\beta} - k_{H\alpha}} \log_{10} \left( \frac{F_{H\alpha} / F_{H\beta}}{\text{HaHb\_ratio}} \right)
-
-    This is then converted to a gas attenuation factor (A_gas) at the H-alpha 
-    wavelength to derive the corrected flux.
+    It uses the Cardelli, Clayton, and Mathis (1989) extinction law by default then converts 
+    to a gas attenuation factor (A_gas) at the H-alpha wavelength to derive the corrected flux.
 
     Examples
     --------
@@ -112,9 +107,9 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
             The logarithmic star formation rate in units of solar masses per year.
         - 'SFR Uncertainty' : float or None
             Uncertainty in the SFR if input uncertainties are provided; otherwise, None.
-        - 'sfrSD' : float
+        - 'SFRSD' : float
             The logarithmic star formation rate surface density in units of solar masses per year per kpc^2.
-        - 'sfrSD Uncertainty' : float or None
+        - 'SFRSD Uncertainty' : float or None
             Uncertainty in the SFRSD if input uncertainties are provided; otherwise, None.
 
     Notes
@@ -134,18 +129,14 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
     propagated to compute uncertainties for both SFR and SFRSD.
 
     """
-    
-    # unpack the flux and stellar velocities
-    flux_ha, flux_ha_sigma = util.unpack_param(flux_ha)
-    sv, sv_sigma = util.unpack_param(stellar_velocity)
 
     # get the local systematic redshift
-    z = ((sv * (1 + redshift))/c.value + redshift)
+    z = ((stellar_velocity * (1 + redshift))/c.value + redshift)
 
     # compute the physical separation (length) of the spaxel
-    D = ((c * z / H0)) # physical distance
+    D = c * z / H0 # physical distance
     theta = Angle(0.2, unit='arcsec') # angular size of spaxel
-    sep = (D[0] * theta.radian).to(u.kpc).value # physical separation
+    sep = (D * theta.radian).to(u.kpc).value # physical separation
     
     # compute the luminosity
     luminosity = 4 * np.pi * (D.to(u.cm).value)**2 * flux_ha * 1e-17
@@ -153,42 +144,21 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
     # compute the SFR and SFR surface density
     SFR = np.log10(luminosity) - 41.27
     SFRSD = np.log10( (10**SFR) / (sep**2) )
-
-    # mask and quality values
-    sfrmask = 0
-    sfrqual = 1
-
-    sfrsdmask = 0
-    sfrsdqual = 1
-
-    if not np.isfinite(SFR):
-        sfrmask = 1
-        sfrqual = -3
-    if not np.isfinite(SFRSD):
-        sfrsdmask = 1
-        sfrsdqual = -3
     
-
+    ## TODO: ERRORS
     # if uncertainties were input, propagate them
-    if flux_ha_sigma is not None and sv_sigma is not None:
-        z_sigma = (sv_sigma/c) * (1 + redshift)
-        D_sigma = (c * z_sigma / H0)
-        sep_sigma = (D_sigma * theta.radian).to(u.kpc).value
-        luminosity_sigma = np.sqrt( (8 * np.pi * (D.to(u.cm).value) * flux_ha * 1e-17 * (D_sigma.to(u.cm).value))**2 + (4 * np.pi * (D.to(u.cm).value)**2 * 1e-17 * flux_ha_sigma)**2 )
-        SFR_sigma = luminosity_sigma / luminosity / np.log(10)
-        SFRSD_sigma = (1 / ( (10**SFR / sep**2) * np.log(10))) * np.sqrt( ( (10**SFR * np.log(10) * SFR_sigma) / sep**2 )**2 + ( (2 * 10**SFR * sep_sigma) / sep**3)**2 )
-    else:
-        SFR_sigma = None
-        SFRSD_sigma = None
+    # if flux_ha_sigma is not None and sv_sigma is not None:
+    #     z_sigma = (sv_sigma/c) * (1 + redshift)
+    #     D_sigma = (c * z_sigma / H0)
+    #     sep_sigma = (D_sigma * theta.radian).to(u.kpc).value
+    #     luminosity_sigma = np.sqrt( (8 * np.pi * (D.to(u.cm).value) * flux_ha * 1e-17 * (D_sigma.to(u.cm).value))**2 + (4 * np.pi * (D.to(u.cm).value)**2 * 1e-17 * flux_ha_sigma)**2 )
+    #     SFR_sigma = luminosity_sigma / luminosity / np.log(10)
+    #     SFRSD_sigma = (1 / ( (10**SFR / sep**2) * np.log(10))) * np.sqrt( ( (10**SFR * np.log(10) * SFR_sigma) / sep**2 )**2 + ( (2 * 10**SFR * sep_sigma) / sep**3)**2 )
+    # else:
+    #     SFR_sigma = None
+    #     SFRSD_sigma = None
 
-    if SFR_sigma is not None and not np.isfinite(SFR_sigma):
-        sfrmask = 1
-        sfrqual = -4
-    if SFRSD_sigma is not None and not np.isfinite(SFRSD_sigma):
-        sfrsdmask = 1
-        sfrsdqual = -4
-
-    return {"SFR":SFR, "SFR Mask":sfrmask, "SFR Uncertainty":SFR_sigma, "SFR Flag":sfrqual, "sfrSD":SFRSD, "sfrSD Mask":sfrsdmask, "sfrSD Uncertainty":SFRSD_sigma, "sfrSD Flag":sfrsdqual}
+    return SFRSD
 
 def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = False):
     """
@@ -228,15 +198,6 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
         A dictionary containing the calculated SFR and SFRSD values and their 
         associated metadata.
         Key contents include:
-        
-        - 'SFR Map' : 2D numpy.ndarray
-            Array of calculated SFRs mapped to spatial locations.
-            
-        - 'SFR Mask' : 2D numpy.ndarray
-            Array of boolean integers; data quality mask for the SFR measurements.
-            
-        - 'SFR Uncertainty' : dict
-            Array of propagated uncertainties associated with the SFR measurements.
 
         - 'SFRSD Map' : 2D numpy.ndarray
             Array of calculated SFRSDs mapped to spatial locations.
@@ -262,46 +223,19 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
     binids = maps['BINID'].data
     spatial_bins = binids[0]
     uniqids = np.unique(spatial_bins)
-
-    # emission line key
-    global flux_key
     
     emline_key = f"EMLINE_{flux_key}"
-        
+    
+    # init the data
+    flux = maps[emline_key].data
+    ivar = maps[f"{emline_key}_IVAR"].data
+    mask = maps[f"{emline_key}_MASK"].data
 
     # init empty maps
-    sfrmap, sfrmap_sigma, sfrdensitymap, sfrdensitymap_sigma = np.zeros(spatial_bins.shape) - 999.0
-    sfrmap_mask, sfrdensitymap_mask = np.zeros(spatial_bins.shape)
-    sfrmap_qual, sfrdensitymap_qual = np.ones(spatial_bins.shape)
 
-
-    ## create dictionary storing all empty maps using dictionary comprehension
-    # helper function to initialize the subdictionary
-    def create_data_entry(key, *maps):
-        data, mask, uncertainty, flag = maps
-        return {
-            f"{key}":data,
-            f"{key} Mask":mask,
-            f"{key} Uncertainty":uncertainty,
-            f"{key} Flag":flag
-        }
-    
-    # main dictionary keys
-    data_keys = ['SFR', 'sfrSD']
-    # tuples of the empty maps to be unpacked by the helper function
-    data_maps = [(sfrmap, sfrmap_mask, sfrmap_sigma, sfrmap_qual), 
-                 (sfrdensitymap, sfrdensitymap_mask, sfrdensitymap_sigma, sfrdensitymap_qual)]
-    
-    # init empty dict and fill with the emtpy maps
-    datadict = {}
-    for key, maptuple in zip(data_keys, data_maps):
-        datadict[key] = create_data_entry(key, *maptuple)
-
-
-    # init the data
-    flux = maps[flux_key].data
-    ivar = maps[f"{flux_key}_IVAR"].data
-    mask = maps[f"{flux_key}_MASK"].data
+    SFRSD_map = np.zeros(spatial_bins.shape) - 999.0
+    SFRSD_sigma = np.zeros(spatial_bins.shape) - 999.0
+    SFRSD_mask = np.zeros(spatial_bins.shape)
 
     # slice values for H alpha and H beta
     ha = flux[23]
@@ -315,38 +249,34 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
     # correct the entire flux map
     ha_flux_corr = correct_dust(ha, hb)
     
+    ## mask unused spaxels
+    w = spatial_bins == -1
+    SFRSD_mask[w] = 6
+
+    items = uniqids[1:]
+    iterator = tqdm(uniqids[1:], desc=f"Constructing SFR map from {flux_key}") if verbose else items
     # loop through each bin and compute SFR
-    for ID in tqdm(uniqids[1:], desc=f"Constructing SFR map from {flux_key}"):
-        mask_sfr = False
-        mask_sfrsd = False
+
+    for ID in iterator:
         w = spatial_bins == ID
         y, x = np.where(w)
 
-        bin_check = util.check_bin_ID(ID, binids, stellar_vel, stellar_vel_mask)
-        sfrmap_qual[w] = bin_check
-        sfrdensitymap_qual[w] = bin_check
-
-        if bin_check != 1:
-            mask_sfr = True
-
-        if not all(mask[w].astype(bool)):
-            mask_sfr = True
+        bin_check = util.check_bin_ID(ID, spatial_bins, DAPPIXMASK_list=[stellar_vel_mask], 
+                                      stellar_velocity_map=stellar_vel)
+        SFRSD_mask[w] = bin_check
 
         # compute SFR
-        ha_med = np.median(ha_flux_corr[w])
-        sv = (np.median(stellar_vel[w]), np.median(1/np.sqrt(stellar_vel_ivar[w])))
-        sfrdict = compute_SFR(ha_med, sv[0], redshift)
+        ha_flux = ha_flux_corr[y[0], x[0]]
+        sv = stellar_vel[y[0], x[0]]
 
-        ### store computed values into main datadict
+        sfrsd = compute_SFR(ha_flux, sv, redshift)
 
-        # loop through the two keys of datadict
-        for key in datadict.keys():
-            # init the list of keys of sfrdict if they contain key
-            subkeys = [subkey for subkey in list(sfrdict.keys()) if key in subkey]
-            # loop through the subkeys and write the values of sfrdict into the empty maps
-            for subkey in subkeys:
-                datadict[key][subkey][w] = sfrdict[subkey]
-    return datadict
+        if not np.isfinite(sfrsd):
+            SFRSD_mask[w] = 5
+            continue
+        SFRSD_map[w] = sfrsd
+
+    return {"SFRSD Map":SFRSD_map, "SFRSD Mask":SFRSD_mask, "SFRSD Uncertainty":SFRSD_sigma}
 
 
 def get_args():
@@ -355,61 +285,69 @@ def get_args():
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
 
-    parser.add_argument('-v','--verbose', type = bool, help = "Print verbose outputs (default: False)", action='store_true', default = False)
-    parser.add_argument('-nc','--no_corr', type = bool, help = "Perform analysis on the 'NO-CORR' DAP outputs. (default: False)", action='store_true', default = False)
-    parser.add_argument('--sflux', type = bool, action = 'store_true', help = "Calculate SFR using the EMLINE_SFLUX DAP measurements instead of EMLINE_GFLUX. (default: False)", default=False)
-    parser.add_argument('-ow', '--overwrite', type = bool, help = "Write data into any existing map file. Overwrite any equivalent data stored inside. (default: True)", action = 'store_false', default = True)
-    parser.add_argument('-np', '--new_plot', type = bool, action = "store_true", help = "Plot the maps to a new pdf rather than overwriting existing (default: False)", default = False)
-    parser.add_argument('-z', '--redshift', type=str, help='Use this extension to optionally input a galaxy redshift guess. (default: None)', default=None)
+    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
+    parser.add_argument('--sflux', action = 'store_true', help = "Calculate SFR using the EMLINE_SFLUX DAP measurements instead of EMLINE_GFLUX. (default: False)", default=False)
 
-    parser.add_argument('--bokeh', type = bool, help = "Broken (default: False)", default = False)
+    parser.add_argument('--bokeh', help = "Broken (default: False)", default = False)
 
     return parser.parse_args()
 
 
 def main(args):
+    warnings.filterwarnings("ignore")
     ## set initial arguments
     # verbose logger
-    logger = util.verbose_logger(verbose=args.verbose)
-    logger.info("Intitalizing directories and paths.")
+
+    analysisplan = defaults.analysis_plans()
+
+    # set the data correlation key
+    corr_key = 'BETA-CORR'
+
+    # initialize directories and paths
+    repodir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(repodir,'data')
+    local_dir = os.path.join(data_dir, 'local_outputs')
+    gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", corr_key, analysisplan)
+    gal_figures_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", "figures")
+
+    util.check_filepath([gal_local_dir, gal_figures_dir], mkdir=True, verbose=args.verbose)
+
 
     # acquire datafiles from file_handler
     filepath_dict = file_handler.init_datapaths(args.galname, args.bin_method, verbose=args.verbose)
 
     # set the matplotlib style config
-    plt.style.use(defaults.matplotlib_rc())
 
     # acquire the redshift
-    redshift = args.redshift
-    if redshift is None:
-        configuration = file_handler.parse_config(filepath_dict['CONFIG'], verbose=args.verbose)
-        redshift = configuration['z']
-        util.verbose_print(args.verbose, f"Redshift z = {redshift} found in {filepath_dict['CONFIG']}")
+    configuration = file_handler.parse_config(filepath_dict['CONFIG'], verbose=args.verbose)
+    redshift = configuration['z']
+    util.verbose_print(args.verbose, f"Redshift z = {redshift} found in {filepath_dict['CONFIG']}")
     
     # set the emline flux key
     flux_key = "GFLUX"
     if args.sflux:
         flux_key = "SFLUX"
 
-    # set the data correlation key
-    corr_key = 'BETA-CORR'
-    if args.no_corr:
-        corr_key = 'NO-CORR'
-
+    cubefil = filepath_dict['LOGCUBE']
+    mapfil = filepath_dict['MAPS']
+    if cubefil is None or mapfil is None:
+        raise ValueError(f"LOGCUBE or MAPS file not found for {args.galname}-{args.bin_method}-{corr_key}")
+    
     ## compute SFRs
-    sfrdict = SFR_map(filepath_dict[corr_key]['MAPS'], redshift, sflux = args.sflux, verbose=args.verbose, bokeh=args.bokeh)
+    sfrdict = SFR_map(mapfil, redshift, flux_key=flux_key, verbose=args.verbose)
 
     ## prepare write outs
     # strings for FITS file and plots
-    hdu_keywords = [f"SFR_HA_{flux_key}", f"SFRSD_HA_{flux_key}"]
-    labels = [r"$\mathrm{log\ SFR_{H\alpha}", r"$\mathrm{log \Sigma_{SFR_{H\alpha}}}$"]
-    units = [r"$(M_{\odot}\ yr^{-1}\ spaxel^{-1})}$", r"$(M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1})}$"]
+    hdu_keyword = "SFRSD"
+    label = r"$\mathrm{log \Sigma_{SFR}}$"
+    unit = r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$"
 
-    for dict_key, hdu_key, label, unit in zip(sfrdict.keys, hdu_keywords, labels, units):
-        datadict = sfrdict[dict_key]
-        mapsdict = file_handler.standard_map_dict(f"{args.galname}", hdu_key, unit, datadict)
-        file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapsdict, overwrite=args.overwrite,
-                                      verbose=args.verbose)
+    mapsdict = file_handler.standard_map_dict(f"{args.galname}", hdu_keyword, unit, sfrdict)
+    file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapsdict, 'SFR-map', gal_local_dir,
+                                        overwrite=True, verbose=args.verbose)
+    
+    plotter.map_plotter(sfrdict['SFRSD Map'], sfrdict['SFRSD Mask'], gal_figures_dir, hdu_keyword, label, unit,
+                        args.galname, args.bin_method, verbose=args.verbose, vmin=-2.5, vmax=0, cmap='rainbow')
 
 
 if __name__ == "__main__":
