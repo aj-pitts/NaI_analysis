@@ -283,5 +283,5 @@ def make_bokeh_map(flux, model, ivar, wavelength, map, binid, output, map_keywor
     save(heatmap)
     print(f"BOKEH plot saved to {out_fname}")
 
-def plot_local_maps(mapsfil, verbose = True):
-    mapkeys = [field for field in hdul.keys() if 'MAP' in field.split('_')]
+#def plot_local_maps(mapsfil, verbose = True):
+#    mapkeys = [field for field in hdul.keys() if 'MAP' in field.split('_')]
