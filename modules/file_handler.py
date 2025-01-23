@@ -458,7 +458,7 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
 
     # init the filename and fullpath to the output file
-    file_name = f"{galdir}-local-maps.fits"
+    file_name = f"{galdir}-local_maps.fits"
     full_path = os.path.join(filepath, file_name)
 
     # timestamp for the header
@@ -474,7 +474,7 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
         for key, value in header_dict_formatted.items():
             image_hdu.header[key] = value
 
-        image_hdu.header = (timestamp, "Last updated timestamp")
+        image_hdu.header['UPDATED'] = (timestamp, "Last updated timestamp")
         new_hdul.append(image_hdu)
 
 
@@ -482,29 +482,45 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
     # if the file is not already made, write it with the mapsdict data
     if not os.path.isfile(full_path):
         new_hdul.insert(0, fits.PrimaryHDU())
+
+        util.verbose_print(verbose, f"Writing data to new file: {full_path}")
         new_hdul.writeto(full_path)
+
+        util.verbose_print(verbose, "Done.")
     
     # if the file exists, open it in update mode
     else:
+        util.verbose_print(verbose, f"Found file: {full_path}")
         with fits.open(full_path, mode='update') as existing_hdul:
+            util.verbose_print(verbose, f"Updating...")
             # grab the extnames from the new hdu
             existing_names = [hdu.name for hdu in existing_hdul]
 
+            existing_name_output = []
+            new_name_output = []
             # iterate through the new HDU list.
             for new_hdu in new_hdul:
                 extname = new_hdu.name
 
                 # If an HDU in the new list matches the existing data names, update the existing data with the new data
                 if extname in existing_names:
+                    existing_name_output.append(extname)
                     existing_hdul[extname].data = new_hdu.data
-                    existing_hdul[extname].header['UPDATE'] = (timestamp, "Last updated timestamp")
+                    existing_hdul[extname].header['UPDATED'] = (timestamp, "Last updated timestamp")
                 
                 # otherwise, append the new data into the file
                 else:
+                    new_name_output.append(extname)
                     existing_hdul.append(new_hdu)
-            existing_hdul.flush(verbose=verbose)
 
-# 
+            util.verbose_print(verbose, f"Updating file: {full_path}")
+            existing_hdul.flush(verbose=verbose)
+            if len(existing_name_output)>0:
+                util.verbose_print(verbose, f"Updated HDU Images: {existing_name_output}")
+            if len(new_name_output)>0:
+                util.verbose_print(verbose, f"Added HDU Images: {new_name_output}")
+            util.verbose_print(verbose, "Done.")
+#           
 # 
 # Configuration Files Section
 # Parser and cleaner for reading .ini files
