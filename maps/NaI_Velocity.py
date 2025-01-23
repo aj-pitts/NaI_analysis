@@ -54,6 +54,25 @@ def NaD_snr(spatial_bins, stellarvel, wave, fluxcube, ivarcube, z_guess):
 
     return snr_map
 
+def combine_mcmc_results(mcmc_paths, verbose=False):
+    items = mcmc_paths
+    iterator = enumerate(tqdm(mcmc_paths,desc="Combining MCMC results")) if verbose else items
+
+    table = None
+    for i,mcmc_fil in iterator:
+        data = fits.open(mcmc_fil)
+        data_table = Table(data[1].data)
+        data_table.remove_columns(['samples','percentiles'])
+        data_table['id'] = np.arange(len(data_table))
+
+        if i == 0:
+            table = data_table
+            continue
+
+        table = join(table, data_table, join_type='outer')
+
+    return table
+
 
 def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
     cube = fits.open(cube_fil)
@@ -78,33 +97,29 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
     ewmap_mask = ew_hdul['EQ_WIDTH_NAI_MASK'].data
     ewmap_error = ew_hdul['EQ_WIDTH_NAI_ERR'].data
 
+
+
     vel_map = np.zeros(binid.shape) - 999.
-    vel_map_mask = np.zeros_like(vel_map)
+    logN_map = np.copy(vel_map)
+    cf_map = np.copy(vel_map)
+    bd_map = np.copy(vel_map)
+
+    mcmc_map_mask = np.zeros_like(vel_map)
+
     vel_map_error = np.zeros_like(vel_map) - 999.
-    table = None
+    logN_map_error = np.copy(vel_map_error)
+    cf_map_error = np.copy(vel_map_error)
+    bd_map_error = np.copy(vel_map_error)
 
     ## mask unused spaxels
     w = binid == -1
-    vel_map_mask[w] = 6
+    mcmc_map_mask[w] = 6
 
     snrmap = NaD_snr(binid, stellarvel, wave, flux, ivar, redshift)
 
-    items = mcmc_paths
-    iterator = enumerate(tqdm(mcmc_paths,desc="Combining MCMC results")) if verbose else items
-
-    for i,mcmc_fil in iterator:
-        data = fits.open(mcmc_fil)
-        data_table = Table(data[1].data)
-        data_table.remove_columns(['samples','percentiles'])
-        data_table['id'] = np.arange(len(data_table))
-
-        if i == 0:
-            table = data_table
-            continue
-
-        table = join(table, data_table, join_type='outer')
+    mcmc_table = combine_mcmc_results(mcmc_paths=mcmc_paths)
     
-    bins, inds = np.unique(table['bin'],return_index=True)
+    bins, inds = np.unique(mcmc_table['bin'],return_index=True)
 
     zipped_items = zip(bins,inds)
     iterator = tqdm(zipped_items, desc='Constructing Velocity Map') if verbose else zipped_items
@@ -115,7 +130,7 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
         indxs = np.where(binid == ID)
 
         bin_check = util.check_bin_ID(ID, binid, DAPPIXMASK_list=[stellarvel_mask], stellar_velocity_map=stellarvel)
-        vel_map_mask[w] = bin_check
+        mcmc_map_mask[w] = bin_check
 
         if args.mask:
             if np.median(ewmap_mask[w]).astype(bool):
@@ -126,12 +141,14 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
                 ew = ewmap[w][0]
 
                 if ew<ew_cut:
-                    vel_map_mask[w] = 7
+                    mcmc_map_mask[w] = 7
 
-        vel_map[w] = table[ind]['velocities']
+        vel_map[w] = mcmc_table[ind]['velocities']
+        logN_map[w] = mcmc_table[ind]['']
+        cf_map[w] = mcmc_table[ind]['']
+
     
-    return {"Vel Map":vel_map, "Vel Map Mask":vel_map_mask, "Vel Map Uncertainty":vel_map_error}
-
+    return {"Vel Map":vel_map, "Vel Map Mask":mcmc_map_mask, "Vel Map Uncertainty":vel_map_error}
     
 def get_args():
     parser = argparse.ArgumentParser(description="A script to create an Na I velocity map from the MCMC results of a beta-corrected galaxy.")
@@ -150,8 +167,7 @@ def main(args):
     corr_key = 'BETA-CORR'
 
     # initialize directories and paths
-    repodir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(repodir,'data')
+    data_dir = defaults.get_data_path('local')
     local_dir = os.path.join(data_dir, 'local_outputs')
     gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", corr_key, analysisplan_methods)
     gal_figures_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", "figures")
