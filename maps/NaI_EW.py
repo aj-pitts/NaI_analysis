@@ -252,11 +252,12 @@ def main(args):
     hdu_name = "EQ_WIDTH_NAI"
     units = "Angstrom"
     mapdict = file_handler.standard_map_dict(args.galname, hdu_name, units, EW_dict)
-    #file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, gal_local_dir,
-    #                              overwrite = args.overwrite, verbose = args.verbose)
-    file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'EW-map', gal_local_dir,
-                                     overwrite= args.overwrite, verbose= args.verbose)
     
+    # file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'EW-map', gal_local_dir,
+    #                                  overwrite= args.overwrite, verbose= args.verbose)
+    
+    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, gal_local_dir, verbose=args.verbose)
+
     ## create the figures with the map plotter
     plotter.map_plotter(EW_dict['EW Map'], EW_dict['EW Map Mask'], gal_figures_dir, hdu_name, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$',
                   args.galname, args.bin_method, error=EW_dict['EW Map Uncertainty'],vmin=-0.2,vmax=1.5, s=1)

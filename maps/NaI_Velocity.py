@@ -56,7 +56,7 @@ def NaD_snr(spatial_bins, stellarvel, wave, fluxcube, ivarcube, z_guess):
 
 def combine_mcmc_results(mcmc_paths, verbose=False):
     items = mcmc_paths
-    iterator = enumerate(tqdm(mcmc_paths,desc="Combining MCMC results")) if verbose else items
+    iterator = enumerate(tqdm(mcmc_paths,desc="Combining MCMC results")) if verbose else enumerate(items)
 
     table = None
     for i,mcmc_fil in iterator:
@@ -73,7 +73,7 @@ def combine_mcmc_results(mcmc_paths, verbose=False):
 
     return table
 
-
+## TODO: add all mcmc parameters to output
 def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
     cube = fits.open(cube_fil)
     maps = fits.open(maps_fil)
@@ -117,7 +117,7 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
 
     snrmap = NaD_snr(binid, stellarvel, wave, flux, ivar, redshift)
 
-    mcmc_table = combine_mcmc_results(mcmc_paths=mcmc_paths)
+    mcmc_table = combine_mcmc_results(mcmc_paths=mcmc_paths, verbose=verbose)
     
     bins, inds = np.unique(mcmc_table['bin'],return_index=True)
 
@@ -144,8 +144,8 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_paths, redshift, verbose=False):
                     mcmc_map_mask[w] = 7
 
         vel_map[w] = mcmc_table[ind]['velocities']
-        logN_map[w] = mcmc_table[ind]['']
-        cf_map[w] = mcmc_table[ind]['']
+        #logN_map[w] = mcmc_table[ind]['']
+        #cf_map[w] = mcmc_table[ind]['']
 
     
     return {"Vel Map":vel_map, "Vel Map Mask":mcmc_map_mask, "Vel Map Uncertainty":vel_map_error}
@@ -209,8 +209,11 @@ def main(args):
     units = "km / s"
 
     mapdict = file_handler.standard_map_dict(args.galname, hdu_name, units, vmap_dict)
-    file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'velocity-map', gal_local_dir,
-                                     overwrite=True, verbose=True)
+
+    # file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'velocity-map', gal_local_dir,
+    #                                  overwrite=True, verbose=True)
+    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, gal_local_dir,
+                                  verbose=args.verbose)
     
     plotter.map_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], gal_figures_dir, hdu_name, r"$v_{\mathrm{Na\ D}}$",
                         r"$\left( \mathrm{km\ s^{-1}} \right)$", args.galname, args.bin_method, vmin=-200, vmax=200, cmap='seismic')

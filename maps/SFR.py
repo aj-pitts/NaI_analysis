@@ -341,8 +341,10 @@ def main(args):
     unit = r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$"
 
     mapsdict = file_handler.standard_map_dict(f"{args.galname}", hdu_keyword, unit, sfrdict)
-    file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapsdict, 'SFR-map', gal_local_dir,
-                                        overwrite=True, verbose=args.verbose)
+    # file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapsdict, 'SFR-map', gal_local_dir,
+    #                                     overwrite=True, verbose=args.verbose)
+    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapsdict, gal_local_dir,
+                                  verbose=args.verbose)
     
     plotter.map_plotter(sfrdict['SFRSD Map'], sfrdict['SFRSD Mask'], gal_figures_dir, hdu_keyword, label, unit,
                         args.galname, args.bin_method, verbose=args.verbose, vmin=-2.5, vmax=0, cmap='rainbow')
