@@ -232,7 +232,6 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
     mask = maps[f"{emline_key}_MASK"].data
 
     # init empty maps
-
     SFRSD_map = np.zeros(spatial_bins.shape) - 999.0
     SFRSD_sigma = np.zeros(spatial_bins.shape) - 999.0
     SFRSD_mask = np.zeros(spatial_bins.shape)
@@ -304,9 +303,8 @@ def main(args):
     corr_key = 'BETA-CORR'
 
     # initialize directories and paths
-    repodir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(repodir,'data')
-    local_dir = os.path.join(data_dir, 'local_outputs')
+    local_data_dir = defaults.get_data_path(subdir='local')
+    local_dir = os.path.join(local_data_dir, 'local_outputs')
     gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", corr_key, analysisplan)
     gal_figures_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", "figures")
 
