@@ -242,8 +242,8 @@ def main(args):
     EW_dict = measure_EW(cubefil, mapfil, redshift, verbose = args.verbose, bokeh = args.bokeh)
 
     ## initialize the output paths
-    root_dir = defaults.get_default_path('data')
-    local_dir = os.path.join(root_dir, 'local_outputs')
+    local_data_dir = defaults.get_data_path('local')
+    local_dir = os.path.join(local_data_dir, 'local_outputs')
     gal_local_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", corr_key, analysisplan)
     gal_figures_dir = os.path.join(local_dir, f"{args.galname}-{args.bin_method}", "figures")
 
