@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import time
+import json
 
 def get_default_path(subdir=None, ensure_exists=True):
     """
@@ -33,6 +34,55 @@ def get_default_path(subdir=None, ensure_exists=True):
         if not os.path.exists(path):
             raise ValueError(f"{subdir} is not a directory within {root_path}")
     return path
+
+def get_data_path(subdir=None):
+    """
+    Retrieve the data path from the configuration file, optionally for a specific subdirectory.
+
+    This function reads the `config.json` file from the default configuration directory,
+    extracts the `data_path` value, and returns it. An optional `subdir` argument can specify
+    a particular subdirectory mode.
+
+    Parameters
+    ----------
+    subdir : str or None, optional
+        Specifies the subdirectory mode. Must be one of {None, 'pipeline', 'local'}.
+        If None (default), no subdirectory mode is applied.
+
+    Returns
+    -------
+    str
+        The absolute path to the data directory as specified in the `config.json` file.
+
+    Raises
+    ------
+    ValueError
+        If `subdir` is not one of {None, 'pipeline', 'local'}.
+    FileNotFoundError
+        If the `config.json` file does not exist in the expected location.
+    KeyError
+        If the `data_path` key is missing in the `config.json` file.
+    json.JSONDecodeError
+        If the `config.json` file contains invalid JSON.
+    """
+    valid_subdirs = {None, 'pipeline', 'local'}
+    if subdir not in valid_subdirs:
+        raise ValueError(f"{subdir} is not a valid subdirectory. Must be one of {valid_subdirs}")
+    
+    config_path = get_default_path('config')
+    config_filepath = os.path.join(config_path, 'config.json')
+    with open(config_filepath) as config_file:
+        config = json.load(config_file)
+    
+    data_path = config['data_path']
+
+    if subdir is not None:
+        data_path = os.path.join(data_path, subdir)
+
+    if not os.path.exists(data_path):
+        raise ValueError(f"Filepath does not exist: {data_path}")
+    
+    return data_path
 
 
 def timer(func):
