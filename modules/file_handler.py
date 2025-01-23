@@ -60,16 +60,18 @@ def init_datapaths(galname, bin_method, verbose=True):
 
     verbose_print(verbose, f"Acquiring relevant files for {galname}-{bin_method}")
     ## initialize paths to the data directory and relevant subdirectories
-    datapath = defaults.get_default_path('data')
+    pipeline_data = defaults.get_data_path(subdir='pipeline')
+    local_data = defaults.get_data_path(subdir='local')
+
 
     galsubdir = f"{galname}-{bin_method}"
     analysisplan = defaults.analysis_plans()
     corr_key = 'BETA-CORR'
 
-    dappath = os.path.join(datapath, "dap_outputs", galsubdir, corr_key, f"{bin_method}-{analysisplan}")
-    mcmcpath = os.path.join(datapath, "mcmc_outputs", galsubdir, corr_key, analysisplan)
-    musecubepath = os.path.join(datapath, "muse_cubes", galname)
-    localdatapath = os.path.join(datapath, "local_outputs", galsubdir, corr_key, analysisplan)
+    dappath = os.path.join(pipeline_data, "dap_outputs", galsubdir, corr_key, f"{bin_method}-{analysisplan}")
+    mcmcpath = os.path.join(pipeline_data, "mcmc_outputs", galsubdir, corr_key, analysisplan)
+    musecubepath = os.path.join(pipeline_data, "muse_cubes", galname)
+    localdatapath = os.path.join(local_data, "local_outputs", galsubdir, corr_key, analysisplan)
 
     outdict = {'CONFIG':None, 
                'LOGCUBE':None, 
@@ -368,62 +370,6 @@ def header_dict_formatter(header_dict):
     return reformat_dict
 
 
-
-def header_dict_formatter_old(header_dict):
-    """
-    ...f
-
-    Parameters
-    ----------
-    header_dict : dict
-        Dictionary of {str: tuple} to be written to the header of the
-        numpy.ndarray image where the keys are strings of the header keywords and the tuple
-        contains the value and comment to be assigned to the header keywords.
-        The tuple values of `header_dict` should be structured 
-        `(value, comment)` where
-            - `value` : An object containing the value to be placed in the header.
-            - `comment` : A str of the comment describing the value.
-        See `astropy.io.fits` FITS Headers Documentation 
-        <https://docs.astropy.org/en/latest/io/fits/usage/headers.html> for additional 
-        information.
-
-    Returns
-    -------
-    dict
-        Returns the header_dict with any necessary changes for formatting FITS headers. Returns
-        exactly header_dict if no reformatting is necessary.
-    """
-
-    def card_builder(key,value,comment):
-        return f"{key.ljust(8)}={str(value).rjust(21)} / {comment}"
-
-    reformat_dict = {}
-
-    for key, header_instance in header_dict.items():
-        if len(key)>8:
-            key = key[:8]
-
-        if not isinstance(header_instance, tuple):
-            header_instance = (header_instance, '')
-
-        value = header_instance[0]
-        comment = header_instance[1]
-        
-        card = card_builder(key,value,comment)
-
-        if len(card)>80:
-            split_card = card[:80].split('/ ',)
-            split_comment = split_card[0]
-            remainder = card[80:]
-            reformat_dict[key] = (value, split_comment)
-            reformat_dict['COMMENT'] = remainder
-
-        else:
-            reformat_dict[key] = (value, comment)
-
-    return reformat_dict
-
-
 def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True, verbose = False):
     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
 
@@ -471,7 +417,8 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
     Parameters
     ----------
     galdir : str
-        The name of the galaxy directory, used to construct the FITS filename.
+        The name of the galaxy directory, standard format of `<galaxy_name>-<bin_method>`;
+        used to construct the FITS filename.
     maps_dict : dict
         A dictionary containing the map data and header information. 
         Keys are extension names (EXTNAME), and values are tuples of the form 
@@ -556,148 +503,6 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
                 else:
                     existing_hdul.append(new_hdu)
             existing_hdul.flush(verbose=verbose)
-
-
-
-def map_file_handler_old(galdir, maps_dict, filepath, overwrite = True, verbose = False):
-    """
-    Update or create a FITS file with specified image HDUs and optional headers.
-    
-    This function checks if a FITS file at the given `filepath` exists.
-    If the file exists, it updates or appends `ImageHDU`s for each array
-    in `maps_dict`. If an HDU with the same name as a key in `maps_dict`
-    already exists in the file, the function overwrites its data and updates
-    its header. If no HDU with that name exists, it appends a new `ImageHDU`
-    with the given name, data, and header. If the file does not exist, it creates
-    a new FITS file with `ImageHDU`s for each array in `maps_dict`.
-
-    Parameters
-    ----------
-    galdir : str
-        String specifying the specific galaxy and binning method directory to 
-        write the data into; should be formatted as `"{galaxy_name}-{binning_method}"`
-
-    maps_dict : dict of {str: (numpy.ndarray, dict)}
-        Dictionary where each key is a string representing the HDU name,
-        each value is a tuple containing:
-            - a 2D `numpy.ndarray` representing the image data, and
-            - A dictionary of {str: tuple} to be written to the header of the
-            numpy.ndarray image. See `astropy.io.fits` [FITS Headers Documentation](https://docs.astropy.org/en/latest/io/fits/usage/headers.html) for 
-            additional information.
-
-    filepath : str
-        Specify a full filepath of the FITS file to be written including the filename.
-    
-    overwrite : bool, optional
-        Default `True` specifying to write into the already existing FITS file if it exists,
-        and overwrite existing `maps_dict` data within the file. If `False`, a new FITS 
-        file containing the `maps_dict` data will be written with an integer identifier in 
-        the filename unless `filepath` is specified and the `filepath` file does not already
-        exist.
-
-    verbose : bool, optional
-        ...
-
-    Raises
-    ------
-    ValueError
-        If any array in `maps_dict` is not a 2-dimensional `numpy.ndarray`,
-        a `ValueError` is raised.
-    
-    Notes
-    -----
-    - If the FITS file exists, this function updates it in place. HDUs with
-      matching names have their `.data` attribute overwritten and headers
-      updated with the provided dictionary.
-    - If the FITS file does not exist, a new file is created containing all
-      `ImageHDU`s in `maps_dict`, plus a default `PrimaryHDU`.
-    - FITS files allow HDUs with the same name, but this function only overwrites
-      the first HDU with a matching name if it exists, and appends any others as new HDUs.
-
-    Examples
-    --------
-    Create or update a FITS file with two image HDUs and custom headers:
-
-    >>> import numpy as np
-    >>> maps_dict = {
-    ...     'Image1': (np.random.random((100, 100)), {'EXPOSURE': 30}),
-    ...     'Image2': (np.random.random((200, 200)), {'EXPOSURE': (60, 'The exposure time in seconds'), 'FILTER': 'V'})
-    ... }
-    >>> map_file_handler('example.fits', maps_dict)
-
-    This will either create 'example.fits' with two `ImageHDU`s named 'Image1'
-    and 'Image2' with the specified headers, or update any existing HDUs with
-    the same names and update their headers.
-
-    """
-
-    util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
-
-    file_name = f"{galdir}-local-maps.fits"
-    full_path = os.path.join(filepath, file_name)
-
-    # if overwrite and the FITS file exists
-    if overwrite and os.path.isfile(full_path):
-        # Open the existing file in update mode
-        with fits.open(full_path, mode='update') as hdul:
-            new_hdul = fits.HDUList()
-
-            # Track existing HDU names
-            existing_names = {hdu.name for hdu in hdul if isinstance(hdu, fits.ImageHDU)}
-            i=0
-
-            for name, (data, header_dict) in maps_dict.items():
-                header_dict = header_dict_formatter(header_dict)
-                if not isinstance(data, np.ndarray) or data.ndim != 2:
-                    raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
-
-                # Create a new HDUList preserving order and replacing matching HDUs
-                new_hdul = fits.HDUList()
-
-                for hdu in hdul:
-                    if isinstance(hdu, fits.ImageHDU) and hdu.name == name:
-                        # Replace the HDU with the new one
-                        updated_hdu = fits.ImageHDU(data=data, name=name)
-                        for key, value in header_dict.items():
-                            updated_hdu.header[key] = value
-                        new_hdul.append(updated_hdu)
-                    else:
-                        # Keep the existing HDU unchanged
-                        new_hdul.append(hdu)
-
-                # Clear the original HDUList and replace it with the new one
-                hdul.clear()
-                hdul.extend(new_hdul)
-
-                print(f"Writing data to HDUL...")
-            hdul.flush()  # Save changes
-            print("Done!       ")
-            print(f"Data saved to {full_path}")
-    else:
-        # Create a new FITS file with the given HDUs
-        hdul = fits.HDUList([fits.PrimaryHDU()])  # Start with a Primary HDU
-        for name, (data, header_dict) in maps_dict.items():
-            header_dict = header_dict_formatter(header_dict)
-            if not isinstance(data, np.ndarray) or data.ndim != 2:
-                raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
-            
-            new_hdu = fits.ImageHDU(data=data, name=name)
-            # Add header information if provided
-            for key, value in header_dict.items():
-                new_hdu.header[key] = value
-            hdul.append(new_hdu)
-
-        current_files = [f for f in os.listdir(filepath) if not f.startswith('.')]
-        if len(current_files)>0:
-            fileslist = glob(os.path.join(filepath, "*.fits"))
-            n = len(fileslist)
-            padded_number = str(n).zfill(3)
-            base_name, ext = os.path.splitext(file_name)
-            file_name = f"{base_name}-{padded_number}{ext}"
-            full_path = os.path.join(filepath, file_name)
-
-        hdul.writeto(full_path, overwrite=True)
-        print(f"Created new FITS file '{filepath}'.")
 
 # 
 # 
@@ -815,3 +620,108 @@ def clean_ini_file(input_file, overwrite=False):
 #     for key, value in header_dict.items():
 #         new_hdu.header[key] = value
 #     hdul.append(new_hdu)
+
+
+# def header_dict_formatter_old(header_dict):
+
+#     def card_builder(key,value,comment):
+#         return f"{key.ljust(8)}={str(value).rjust(21)} / {comment}"
+
+#     reformat_dict = {}
+
+#     for key, header_instance in header_dict.items():
+#         if len(key)>8:
+#             key = key[:8]
+
+#         if not isinstance(header_instance, tuple):
+#             header_instance = (header_instance, '')
+
+#         value = header_instance[0]
+#         comment = header_instance[1]
+        
+#         card = card_builder(key,value,comment)
+
+#         if len(card)>80:
+#             split_card = card[:80].split('/ ',)
+#             split_comment = split_card[0]
+#             remainder = card[80:]
+#             reformat_dict[key] = (value, split_comment)
+#             reformat_dict['COMMENT'] = remainder
+
+#         else:
+#             reformat_dict[key] = (value, comment)
+
+#     return reformat_dict
+
+
+
+
+# def map_file_handler_old(galdir, maps_dict, filepath, overwrite = True, verbose = False):
+
+#     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
+
+#     file_name = f"{galdir}-local-maps.fits"
+#     full_path = os.path.join(filepath, file_name)
+
+#     # if overwrite and the FITS file exists
+#     if overwrite and os.path.isfile(full_path):
+#         # Open the existing file in update mode
+#         with fits.open(full_path, mode='update') as hdul:
+#             new_hdul = fits.HDUList()
+
+#             # Track existing HDU names
+#             existing_names = {hdu.name for hdu in hdul if isinstance(hdu, fits.ImageHDU)}
+#             i=0
+
+#             for name, (data, header_dict) in maps_dict.items():
+#                 header_dict = header_dict_formatter(header_dict)
+#                 if not isinstance(data, np.ndarray) or data.ndim != 2:
+#                     raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
+
+#                 # Create a new HDUList preserving order and replacing matching HDUs
+#                 new_hdul = fits.HDUList()
+
+#                 for hdu in hdul:
+#                     if isinstance(hdu, fits.ImageHDU) and hdu.name == name:
+#                         # Replace the HDU with the new one
+#                         updated_hdu = fits.ImageHDU(data=data, name=name)
+#                         for key, value in header_dict.items():
+#                             updated_hdu.header[key] = value
+#                         new_hdul.append(updated_hdu)
+#                     else:
+#                         # Keep the existing HDU unchanged
+#                         new_hdul.append(hdu)
+
+#                 # Clear the original HDUList and replace it with the new one
+#                 hdul.clear()
+#                 hdul.extend(new_hdul)
+
+#                 print(f"Writing data to HDUL...")
+#             hdul.flush()  # Save changes
+#             print("Done!       ")
+#             print(f"Data saved to {full_path}")
+#     else:
+#         # Create a new FITS file with the given HDUs
+#         hdul = fits.HDUList([fits.PrimaryHDU()])  # Start with a Primary HDU
+#         for name, (data, header_dict) in maps_dict.items():
+#             header_dict = header_dict_formatter(header_dict)
+#             if not isinstance(data, np.ndarray) or data.ndim != 2:
+#                 raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
+            
+#             new_hdu = fits.ImageHDU(data=data, name=name)
+#             # Add header information if provided
+#             for key, value in header_dict.items():
+#                 new_hdu.header[key] = value
+#             hdul.append(new_hdu)
+
+#         current_files = [f for f in os.listdir(filepath) if not f.startswith('.')]
+#         if len(current_files)>0:
+#             fileslist = glob(os.path.join(filepath, "*.fits"))
+#             n = len(fileslist)
+#             padded_number = str(n).zfill(3)
+#             base_name, ext = os.path.splitext(file_name)
+#             file_name = f"{base_name}-{padded_number}{ext}"
+#             full_path = os.path.join(filepath, file_name)
+
+#         hdul.writeto(full_path, overwrite=True)
+#         print(f"Created new FITS file '{filepath}'.")
