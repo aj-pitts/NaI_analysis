@@ -219,11 +219,11 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
 
     if flag == "data":
         header = {
-            "DESC":(f"{galname} {HDU_keyword.lower().replace("_"," ")} map",""),
+            "DESC":(f"{galname} {HDU_keyword.replace("_"," ")} map",""),
             "BUNIT":(unit_str, "Unit of pixel value"),
             "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
             "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "EXTNAME":(HDU_keyword, "extension name"),
+            "EXTNAME":(HDU_keyword, "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
@@ -232,7 +232,7 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
             "BUNIT":(unit_str, "Unit of pixel value"),
             "DATA":(HDU_keyword, "Associated data extension"),
             "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "EXTNAME":(f"{HDU_keyword}_ERR", "extension name"),
+            "EXTNAME":(f"{HDU_keyword}_ERR", "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
@@ -249,14 +249,14 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
             "Bit_6":(quality[6],"Description of bitmask 6"),
             "Bit_7":(quality[7],"Description of bitmask 6"),
             "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
-            "EXTNAME":(f"{HDU_keyword}_MASK", "extension name"),
+            "EXTNAME":(f"{HDU_keyword}_MASK", "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
     return header
 
 
-def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
+def standard_map_dict(galname, mapdict, HDU_keywords = None, unit_strs = None, custom_header_dict = None):
     """
     Creates a standardized dictionary mapping for the given galaxy name and HDU keyword.
 
@@ -289,7 +289,6 @@ def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
     - `<HDU_keyword>` : tuple of (data, header_dict)
     - `<HDU_keyword>_MASK` : tuple of (mask_data, header_dict)
     - `<HDU_keyword>_ERROR` : tuple of (error_data, header_dict)
-    - `<HDU_keyword>_FLAG` : tuple of (flag_data, header_dict)
 
     The header dictionary is created using the `standard_header_dict` function, which includes the
     galaxy name, HDU keyword, unit string, and a specific flag for each type of data.
@@ -300,12 +299,29 @@ def standard_map_dict(galname, HDU_keyword, unit_str, mapdict):
     """
     
     standard_dict = {}
-    keywords = [HDU_keyword, f"{HDU_keyword}_MASK", f"{HDU_keyword}_ERROR"]
-    flags = ["data","mask","err"]
 
-    for keyword, mapdata, flag in zip(keywords, mapdict.values(), flags):
-        standard_header = standard_header_dict(galname, HDU_keyword, unit_str, flag)
-        standard_dict[keyword] = (mapdata, standard_header)
+    if not isinstance(HDU_keywords, list):
+        HDU_keywords = [HDU_keywords]
+    
+    if not isinstance(unit_strs, list):
+        unit_strs = [unit_strs]
+
+    if custom_header_dict is not None:
+        for keyword, mapdata, header_dict in zip(custom_header_dict.keys(), mapdict.values(), custom_header_dict.values()):
+            standard_dict[keyword] = (mapdata, header_dict)
+
+
+    else:
+        if HDU_keywords is None or unit_strs is None:
+            raise ValueError("HDU_keywords and unit_strs parameters required if custom_header_dict is not input.")
+        
+        keywords = HDU_keywords + [f"{HDU_keywords}_MASK", f"{HDU_keywords}_ERROR"]
+
+        flags = ["data"] * len(HDU_keywords) + ["mask","err"]
+
+        for keyword, mapdata, units, flag in zip(keywords, mapdict.values(), unit_strs, flags):
+            standard_header = standard_header_dict(galname, keyword, units, flag)
+            standard_dict[keyword] = (mapdata, standard_header)
 
     return standard_dict
 
@@ -403,8 +419,10 @@ def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True,
     hdul.writeto(full_path, overwrite=True)
     print(f"Created new FITS file '{full_path}'")
 
-
-def map_file_handler(galdir, maps_dict, filepath, verbose = False):
+#### TODO:
+# Add functionality to input a list of mapdicts
+# Add standard file image order
+def map_file_handler(galdir, maps_dict, filepath, verbose = False, preserve_standard_order = False):
     """
     Handles the creation and updating of a FITS file containing galaxy map data.
 
@@ -453,6 +471,9 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False):
     ValueError
         If `maps_dict` is empty or contains duplicate extension names.
     """
+    ##### TODO
+    if preserve_standard_order:
+        HDUL_order = ['primary', 'EQ_WIDTH_NAI', 'EQ_WIDTH_NAI_MASK', 'EQ_WIDTH_NAI']
 
     # check if the filepath exists
     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
