@@ -16,12 +16,12 @@ from modules import defaults, file_handler, util, plotter
 def get_ew_cut(snr):
     if snr<= 30:
         return np.inf
-    elif snr <= 38:
-        return 0.5
-    elif snr <= 64:
-        return 0.275
+    elif snr <= 60:
+        return 1.0
+    elif snr <= 90:
+        return 0.8
     else:
-        return 0.05
+        return 0.6
 
 def NaD_snr_map(cube_fil, maps_fil, z_guess, verbose=False):
     cube = fits.open(cube_fil)
@@ -51,7 +51,9 @@ def NaD_snr_map(cube_fil, maps_fil, z_guess, verbose=False):
     #region = (5880, 5910)
     windows = [(5865, 5875), (5915, 5925)]
 
-    for ID in np.unique(spatial_bins):
+    items = np.unique(spatial_bins)
+    iterator = tqdm(np.unique(spatial_bins), desc="Constructing S/N Map") if verbose else items
+    for ID in iterator:
         w = ID == spatial_bins
         y_inds, x_inds = np.where(w)
         
@@ -146,15 +148,15 @@ def make_mcmc_results_cube(cube_fil, mcmc_table, verbose=False):
             "C04":("C_f", "Data in channel 4"),
             "HDUCLASS":("CUBE", "Data format"),
             "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C01"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C01"),
-            "BUNIT_04":(" ", "Unit of pixel value in C01"),
-            "ERRDATA1":(f"{HDU_name}_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
-            "ERRDATA2":(f"{HDU_name}_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
+            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
+            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
+            "BUNIT_04":(" ", "Unit of pixel value in C04"),
+            "ERRDATA1":(f"MCMC_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
+            "ERRDATA2":(f"MCMC_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
             "EXTNAME":(HDU_name, "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         },
-        f"{HDU_name}_16TH_PERC":{
+        f"MCMC_16TH_PERC":{
             "DESC":(f"{args.galname} {HDU_name.replace("_"," ")} 16th percentile uncertainty",""),
             "C01":("lambda_0", "Data in channel 1"),
             "C02":("log_N", "Data in channel 2"),
@@ -162,15 +164,15 @@ def make_mcmc_results_cube(cube_fil, mcmc_table, verbose=False):
             "C04":("C_f", "Data in channel 4"),
             "HDUCLASS":("CUBE", "Data format"),
             "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C01"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C01"),
-            "BUNIT_04":(" ", "Unit of pixel value in C01"),
+            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
+            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
+            "BUNIT_04":(" ", "Unit of pixel value in C04"),
             "DATA":(HDU_name, "Associated data extension"),
-            "ERRDATA2":(f"{HDU_name}_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
-            "EXTNAME":(f"{HDU_name}_16TH_PERC", "Extension name"),
+            "ERRDATA2":(f"MCMC_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
+            "EXTNAME":(f"MCMC_16TH_PERC", "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         },
-        f"{HDU_name}_84TH_PERC":{
+        f"MCMC_84TH_PERC":{
             "DESC":(f"{args.galname} {HDU_name.replace("_"," ")} 84th percentile uncertainty",""),
             "C01":("lambda_0", "Data in channel 1"),
             "C02":("log_N", "Data in channel 2"),
@@ -178,25 +180,26 @@ def make_mcmc_results_cube(cube_fil, mcmc_table, verbose=False):
             "C04":("C_f", "Data in channel 4"),
             "HDUCLASS":("CUBE", "Data format"),
             "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C01"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C01"),
-            "BUNIT_04":(" ", "Unit of pixel value in C01"),
+            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
+            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
+            "BUNIT_04":(" ", "Unit of pixel value in C03"),
             "DATA":(HDU_name, "Associated data extension"),
-            "ERRDATA1":(f"{HDU_name}_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
-            "EXTNAME":(f"{HDU_name}_84TH_PERC", "Extension name"),
+            "ERRDATA1":(f"MCMC_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
+            "EXTNAME":(f"MCMC_84TH_PERC", "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     }
     return mcmc_dict, mcmc_header_dict
 
 
-def make_vmap(cube_fil, maps_fil, snrmap, EW_file, mcmc_table, verbose=False):
+def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
     cube = fits.open(cube_fil)
     maps = fits.open(maps_fil)
     if cube['primary'].header['dapqual'] == 30:
         raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
 
     lamrest = 5897.558
+    c = 2.998e5
 
     binid = cube['BINID'].data[0]
 
@@ -208,21 +211,20 @@ def make_vmap(cube_fil, maps_fil, snrmap, EW_file, mcmc_table, verbose=False):
     ewmap_mask = ew_hdul['EQ_WIDTH_NAI_MASK'].data
 
     vel_map = np.zeros(binid.shape) - 999.
-    print(vel_map.shape)
-    vel_map_error = np.zeros_like(vel_map) - 999.
+
+    vel_map_error = np.zeros((2, binid.shape[0], binid.shape[1])) - 999.
     vmap_mask = np.zeros_like(vel_map)
 
     frac_map = np.zeros_like(vel_map)
-
-    term_vel_map = np.zeros_like(vel_map)
-    term_vel_map_mask = np.zeros_like(term_vel_map)
     
     ### TODO ###
-    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data 
-    term_vel_map_error = np.copy(vel_map_error) 
+    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
     ewmap_error = ew_hdul['EQ_WIDTH_NAI_ERR'].data 
     ############
 
+    # compute the Na D S/N
+    if args.mask:
+        snrmap = NaD_snr_map(cube_fil, maps_fil, redshift, verbose=verbose)
 
     ## mask unused spaxels
     w = binid == -1
@@ -255,31 +257,93 @@ def make_vmap(cube_fil, maps_fil, snrmap, EW_file, mcmc_table, verbose=False):
         lambda_samples = mcmc_table[ind]['lambda samples']
         percentiles = mcmc_table[ind]['percentiles']
 
-        bD = percentiles[2,0]
+        lambda_percentiles = percentiles[0]
+
+        lambda_16 = lambda_percentiles[1]
+        lambda_84 = lambda_percentiles[2]
+
+        velocity_16 = c * lambda_16 / lamrest
+        velocity_84 = c * lambda_84 / lamrest
+
+        vel_map_error[0][w] = velocity_16
+        vel_map_error[1][w] = velocity_84
+
+
+        if min(abs(velocity_84), abs(velocity_16)) >= 20: # ~ lambda unc of 0.4 Å
+            vmap_mask[w] = 8
         
         if velocity == 0:
             frac = 0
         else:
-            frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity>0 else np.sum(lambda_samples < lamrest)/lambda_samples.size
-
-        if velocity < 0:
-            if frac >= .95:
-                term_vel_out = velocity - np.sqrt(abs(np.log(0.1))) * bD
-        else:
-            term_vel_map_mask[w] = 1
-            term_vel_out = 0
+            frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity > 0 else np.sum(lambda_samples < lamrest)/lambda_samples.size
 
         frac_map[w] = frac
         vel_map[w] = velocity
-        term_vel_map[w] = term_vel_out
 
     vmap_name = "Vel Map"
     vmap_dict = {f"{vmap_name}":vel_map, f"{vmap_name} Confidence":frac_map, f"{vmap_name} Mask":vmap_mask, f"{vmap_name} Uncertainty":vel_map_error}
 
-    term_vel_map_name = "Vout"
-    term_velmap_dict = {f"{term_vel_map_name}":term_vel_map, f"{term_vel_map_name} Mask":term_vel_map_mask, f"{term_vel_map_name} Uncertainty":term_vel_map_error}
+    return vmap_dict
 
-    return vmap_dict, term_velmap_dict
+
+def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose=False):
+    cube = fits.open(cube_fil)
+
+    binid = cube['BINID'].data[0]
+
+    doppler_param = mcmc_dict['MCMC Results'][2]
+    doppler_param_16 = mcmc_dict['MCMC 16th Percentile'][2]
+    doppler_param_84 = mcmc_dict['MCMC 84th Percentile'][2]
+
+    vmap = vmap_dict['Vel Map']
+    vmap_mask = vmap_dict['Vel Map Mask']
+    vmap_error = vmap_dict['Vel Map Uncertainty']
+    frac = vmap_dict['Vel Map Confidence']
+
+    term_vmap = np.zeros_like(binid)
+    term_vmap_mask = np.zeros_like(binid)
+    term_vmap_error = np.zeros((2, binid.shape[0], binid.shape[1]))
+
+    items = np.unique(binid[1:])
+    iterator = tqdm(items, desc="Constructing terminal velocity outflow map") if verbose else items
+    for ID in iterator:
+        w = ID == binid
+        Y, X = np.where(w)
+        y, x = Y[0], X[0]
+
+        bin_v_mask = vmap_mask[y, x]
+        if bool(bin_v_mask):
+            term_vmap_mask[w] = bin_v_mask
+        
+        bin_frac = frac[y, x]
+        bin_vel = vmap[y, x]
+        bin_vel_mask = vmap_mask[y, x]
+        bin_vel_error_16 = vmap_error[0 ,y, x]
+        bin_vel_error_84 = vmap_error[1, y, x]
+
+
+        term_vmap_mask[w] = bin_vel_mask
+        
+        if bin_vel >= 0:
+            term_vmap_mask[w] = 9
+            continue
+        
+        if bin_frac < .95:
+            term_vmap_mask[w] = 10
+            continue
+        
+        bin_bD = doppler_param[y, x]
+        bD_upper = bin_bD + doppler_param_84[y, x]
+        bD_lower = bin_bD - doppler_param_16[y, x]
+
+        term_vmap[w] = abs(bin_vel) + (np.sqrt(abs(np.log(0.1))) * bin_bD)
+
+        term_vmap_error[0][w] = np.sqrt( bin_vel_error_16**2 + (np.log(0.1) * bD_lower)**2 )
+        term_vmap_error[1][w] = np.sqrt( bin_vel_error_84**2 + (np.log(0.1) * bD_upper)**2 )
+
+    name = "Vout"
+    return {f"{name}":term_vmap, f"{name} Mask":term_vmap_mask, f"{name} Uncertainty":term_vmap_error}
+        
 
     
 def get_args():
@@ -306,7 +370,7 @@ def main(args):
 
     util.check_filepath([gal_local_dir, gal_figures_dir], mkdir=True, verbose=verbose)
 
-    datapath_dict = file_handler.init_datapaths(args.galname, args.bin_method)
+    datapath_dict = file_handler.init_datapaths(args.galname, args.bin_method, verbose=verbose)
 
     ## acquire logcube and maps files from datapath dict, raise error if they were not found
     configuration = file_handler.parse_config(datapath_dict['CONFIG'], verbose=args.verbose)
@@ -341,36 +405,38 @@ def main(args):
     # write mcmc results into datacubes
     mcmc_dict, mcmc_header_dict = make_mcmc_results_cube(cubefil, mcmc_table, verbose=verbose)
 
-    # compute the Na D S/N
-    snrmap = NaD_snr_map(cubefil, mapsfil, redshift, verbose)
-
     # measure Doppler V of line center
-    vmap_dict, term_vmap_dict = make_vmap(cubefil, mapsfil, snrmap, ew_file, mcmc_table, verbose)
+    vmap_dict = make_vmap(cubefil, mapsfil, ew_file, mcmc_table, redshift, verbose)
+    term_vmap_dict = make_terminal_vmap(vmap_dict=vmap_dict, mcmc_dict=mcmc_dict, cube_fil=cubefil, 
+                                        verbose=verbose)
 
-    print(vmap_dict['Vel Map'].shape)
-    breakpoint()
 
     # structure the data for writing
-    hdu_name = "NaI_VELOCITY"
+    velocity_hduname = "V_NaI"
+    additional_data = ["V_NaI_FRAC"]
+    additional_units = ['']
+    additinoal_description = ['Fractional confidence of NaI_VELOCITY']
     units = "km / s"
 
     mcmc_mapdict = file_handler.standard_map_dict(args.galname, mcmc_dict, custom_header_dict=mcmc_header_dict)
 
-    velocity_mapdict = file_handler.standard_map_dict(args.galname, vmap_dict, HDU_keywords=hdu_name, unit_strs=units)
+    velocity_mapdict = file_handler.standard_map_dict(args.galname, vmap_dict, HDU_keyword=velocity_hduname, IMAGE_units=units,
+                                                      additional_keywords=additional_data, additional_units=additional_units, 
+                                                      additional_descriptions=additinoal_description, asymmetric_error=True)
 
-    hdu_name = "V_MAX_OUTFLOW"
-    velocity_outflow_max_dict = file_handler.standard_map_dict(args.galname, term_vmap_dict, HDU_keywords=hdu_name, unit_strs=units)
+    vout_hdu_name = "V_MAX_OUT"
+    additional_masks = [(9, 'Bin Sodium is redshifted'), (10,'Bin velocity confidence is < 95%')]
+    velocity_outflow_max_dict = file_handler.standard_map_dict(args.galname, term_vmap_dict, HDU_keyword=vout_hdu_name, IMAGE_units=units, 
+                                                               additional_mask_bits=additional_masks, asymmetric_error=True)
 
     # write the data
     gal_dir = f"{args.galname}-{args.bin_method}"
-    file_handler.map_file_handler(gal_dir, velocity_mapdict, gal_local_dir,
-                                  verbose=args.verbose)
-    file_handler.map_file_handler(gal_dir, velocity_outflow_max_dict, gal_local_dir,
-                                  verbose=args.verbose)
-    file_handler.map_file_handler(gal_dir, mcmc_mapdict, gal_local_dir, 
-                                  verbose=args.verbose)
+
+    file_handler.map_file_handler(gal_dir, [velocity_mapdict, velocity_outflow_max_dict, mcmc_mapdict], 
+                                  gal_local_dir, verbose=args.verbose)
     
-    plotter.map_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], gal_figures_dir, hdu_name, r"$v_{\mathrm{Na\ D}}$",
+    # make the plots
+    plotter.map_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], gal_figures_dir, velocity_hduname, r"$v_{\mathrm{Na\ D}}$",
                         r"$\left( \mathrm{km\ s^{-1}} \right)$", args.galname, args.bin_method, vmin=-200, vmax=200, cmap='seismic')
 
 if __name__ == "__main__":

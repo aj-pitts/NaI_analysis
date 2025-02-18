@@ -249,14 +249,14 @@ def main(args):
 
     util.check_filepath([gal_local_dir, gal_figures_dir], mkdir=True, verbose=args.verbose)
 
-    hdu_name = "EQ_WIDTH_NAI"
+    hdu_name = "EW_NAI"
     units = "Angstrom"
-    mapdict = file_handler.standard_map_dict(args.galname, hdu_name, units, EW_dict)
+    mapdict = file_handler.standard_map_dict(args.galname, EW_dict, HDU_keyword=hdu_name, IMAGE_units=units)
     
     # file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'EW-map', gal_local_dir,
     #                                  overwrite= args.overwrite, verbose= args.verbose)
     
-    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", mapdict, gal_local_dir, verbose=args.verbose)
+    file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", [mapdict], gal_local_dir, verbose=args.verbose)
 
     ## create the figures with the map plotter
     plotter.map_plotter(EW_dict['EW Map'], EW_dict['EW Map Mask'], gal_figures_dir, hdu_name, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$',

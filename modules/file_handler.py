@@ -19,7 +19,7 @@ from modules.util import verbose_print
 # 
 # 
 
-def init_datapaths(galname, bin_method, verbose=True):
+def init_datapaths(galname, bin_method, verbose=False):
     """
     Acquires the path(s) to the primary file(s) of a given galaxy by request.
 
@@ -169,7 +169,8 @@ def init_datapaths(galname, bin_method, verbose=True):
 # 
 # 
 
-def standard_header_dict(galname, HDU_keyword, unit_str, flag):
+def standard_header_dict(galname, HDU_keyword, unit_str, flag, add_descrip = None, additional_mask_bits = None, 
+                         asymmetric_error = False):
     """
     Creates a standard header dictionary for FITS file extensions based on the given flag.
 
@@ -221,42 +222,84 @@ def standard_header_dict(galname, HDU_keyword, unit_str, flag):
         header = {
             "DESC":(f"{galname} {HDU_keyword.replace("_"," ")} map",""),
             "BUNIT":(unit_str, "Unit of pixel value"),
-            "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
+            "ERRDATA":(f"{HDU_keyword}_ERROR", "Associated uncertainty values extension"),
             "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
             "EXTNAME":(HDU_keyword, "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
-    elif flag == "err":
-        header = {
-            "BUNIT":(unit_str, "Unit of pixel value"),
-            "DATA":(HDU_keyword, "Associated data extension"),
-            "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
-            "EXTNAME":(f"{HDU_keyword}_ERR", "Extension name"),
-            "AUTHOR":("Andrew Pitts","")
-        }
+    elif flag == "error":
+        if asymmetric_error:
+            header = {
+                "DESC":(f"Assymetric uncertainty map for {galname} {HDU_keyword.replace("_"," ")}", ""),
+                "BUNIT":(unit_str, "Unit of pixel value"),
+                "C01":("Error propagated from MCMC 16th percentile", "Data in Channel 1"),
+                "C02":("Error propagated from MCMC 84th percentile", "Data in Channel 2"),
+                "DATA":(HDU_keyword, "Associated data extension"),
+                "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
+                "EXTNAME":(f"{HDU_keyword}", "Extension name"),
+                "AUTHOR":("Andrew Pitts","")
+            }
+        else:
+            header = {
+                "DESC":(f"Uncertainty map for {galname} {HDU_keyword.replace("_"," ")}", ""),
+                "BUNIT":(unit_str, "Unit of pixel value"),
+                "DATA":(HDU_keyword, "Associated data extension"),
+                "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
+                "EXTNAME":(f"{HDU_keyword}", "Extension name"),
+                "AUTHOR":("Andrew Pitts","")
+            }
     
     elif flag == "mask":
         quality = defaults.local_quality_flag()
         header = {
-            "DATA":("","Data Quality Bitmask"),
-            "Bit_0":(quality[0],"Description of bitmask 0"),
-            "Bit_1":(quality[1],"Description of bitmask 1"),
-            "Bit_2":(quality[2],"Description of bitmask 2"),
-            "Bit_3":(quality[3],"Description of bitmask 3"),
-            "Bit_4":(quality[4],"Description of bitmask 4"),
-            "Bit_5":(quality[5],"Description of bitmask 5"),
-            "Bit_6":(quality[6],"Description of bitmask 6"),
-            "Bit_7":(quality[7],"Description of bitmask 6"),
-            "ERRDATA":(f"{HDU_keyword}_ERR", "Associated uncertainty values extension"),
-            "EXTNAME":(f"{HDU_keyword}_MASK", "Extension name"),
+            "DATA":("","Data Quality Categorical Mask"),
+            "Int_0":(quality[0],"Description of mask int 0"),
+            "Int_1":(quality[1],"Description of mask int 1"),
+            "Int_2":(quality[2],"Description of mask int 2"),
+            "Int_3":(quality[3],"Description of mask int 3"),
+            "Int_4":(quality[4],"Description of mask int 4"),
+            "Int_5":(quality[5],"Description of mask int 5"),
+            "Int_6":(quality[6],"Description of mask int 6"),
+            "Int_7":(quality[7],"Description of mask int 7"),
+            "Int_8":(quality[8],"Description of mask int 8"),
+            "ERRDATA":(f"{HDU_keyword}_ERROR", "Associated uncertainty values extension"),
+            "EXTNAME":(f"{HDU_keyword}", "Extension name"),
+            "AUTHOR":("Andrew Pitts","")
+        }
+        if additional_mask_bits is not None:
+            occupied = np.arange(9)
+            items = list(header.items())
+            
+            for i in range(len(additional_mask_bits)):
+                index = i+10
+                new_int = additional_mask_bits[i][0]
+                new_int_desc = additional_mask_bits[i][1]
+
+                if new_int in occupied:
+                    raise ValueError(f"Additional Int Mask {str(new_int)} is already used by quality flag.")
+                
+                bit_str = f'Bit_{str(new_int)}'
+
+                items.insert(index, (bit_str, (new_int_desc, f'Description of mask int {str(new_int)}')))
+            
+            header = items.dict()
+
+
+    elif flag == "additional":
+        header = {
+            "DESC":(f"{galname} {add_descrip}",""),
+            "BUNIT":(unit_str, "Unit of pixel value"),
+            "QUALDATA":(f"{HDU_keyword}_MASK", "Associated quality extension"),
+            "EXTNAME":(HDU_keyword, "Extension name"),
             "AUTHOR":("Andrew Pitts","")
         }
     
     return header
 
 
-def standard_map_dict(galname, mapdict, HDU_keywords = None, unit_strs = None, custom_header_dict = None):
+def standard_map_dict(galname, mapdict, HDU_keyword = None, IMAGE_units = None, additional_keywords = [], additional_units = [],
+                    additional_descriptions = [], additional_mask_bits = [], custom_header_dict = None, asymmetric_error = False):
     """
     Creates a standardized dictionary mapping for the given galaxy name and HDU keyword.
 
@@ -300,27 +343,34 @@ def standard_map_dict(galname, mapdict, HDU_keywords = None, unit_strs = None, c
     
     standard_dict = {}
 
-    if not isinstance(HDU_keywords, list):
-        HDU_keywords = [HDU_keywords]
-    
-    if not isinstance(unit_strs, list):
-        unit_strs = [unit_strs]
+    for param in [additional_descriptions, additional_keywords, additional_units]:
+        if not isinstance(param, list):
+            raise ValueError(f"Parameters additional_keywords, additional_units, and additional_descriptions must be Python lists.")
 
     if custom_header_dict is not None:
         for keyword, mapdata, header_dict in zip(custom_header_dict.keys(), mapdict.values(), custom_header_dict.values()):
             standard_dict[keyword] = (mapdata, header_dict)
 
-
     else:
-        if HDU_keywords is None or unit_strs is None:
-            raise ValueError("HDU_keywords and unit_strs parameters required if custom_header_dict is not input.")
+        if HDU_keyword is None or IMAGE_units is None:
+            raise ValueError("HDU_keyword and IMAGE_units parameters required if custom_header_dict is None.")
         
-        keywords = HDU_keywords + [f"{HDU_keywords}_MASK", f"{HDU_keywords}_ERROR"]
+        keywords = [HDU_keyword] + additional_keywords + [f"{HDU_keyword}_MASK", f"{HDU_keyword}_ERROR"]
+        unit_list = [IMAGE_units] + additional_units + ['', IMAGE_units]
+        descriptions = [''] + additional_descriptions + ['', '']
 
-        flags = ["data"] * len(HDU_keywords) + ["mask","err"]
+        flags = ["data"] + ['additional'] * len(additional_keywords) + ["mask", "error"]
 
-        for keyword, mapdata, units, flag in zip(keywords, mapdict.values(), unit_strs, flags):
-            standard_header = standard_header_dict(galname, keyword, units, flag)
+        if len(keywords) != len(unit_list):
+            raise ValueError(f"additional_keywords and additional_units must have the same length")
+        
+        for keyword, mapdata, units, descrip, flag in zip(keywords, mapdict.values(), unit_list, descriptions, flags):
+            if keyword == 'mask':
+                standard_header = standard_header_dict(galname, keyword, units, flag, add_descrip=descrip, 
+                                                       additional_mask_bits=additional_mask_bits)
+            else:
+                standard_header = standard_header_dict(galname, keyword, units, flag, add_descrip=descrip, 
+                                                       asymmetric_error=asymmetric_error)
             standard_dict[keyword] = (mapdata, standard_header)
 
     return standard_dict
@@ -422,7 +472,7 @@ def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True,
 #### TODO:
 # Add functionality to input a list of mapdicts
 # Add standard file image order
-def map_file_handler(galdir, maps_dict, filepath, verbose = False, preserve_standard_order = False):
+def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve_standard_order = False):
     """
     Handles the creation and updating of a FITS file containing galaxy map data.
 
@@ -471,9 +521,20 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False, preserve_stan
     ValueError
         If `maps_dict` is empty or contains duplicate extension names.
     """
-    ##### TODO
-    if preserve_standard_order:
-        HDUL_order = ['primary', 'EQ_WIDTH_NAI', 'EQ_WIDTH_NAI_MASK', 'EQ_WIDTH_NAI']
+
+    def reorder_hdu(hdul):
+        HDUL_order = ['SPATIAL_BINS', 
+                      'EW_NAI', 'EW_NAI_MASK', 'EW_NAI_ERROR',
+                      'SFRSD', 'SFRSD_MASK', 'SFRSD_ERROR',
+                      'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
+                      'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
+                      'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCM_84TH_PERC']
+        primary_hdu = hdul[0]
+        sorted_hdus = [primary_hdu]
+        sorted_hdus += sorted(hdul[1:], key=lambda hdu: HDUL_order.index(hdu.name) if hdu.name in HDUL_order else len(HDUL_order))
+        return fits.HDUList(sorted_hdus)
+    
+
 
     # check if the filepath exists
     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
@@ -486,62 +547,54 @@ def map_file_handler(galdir, maps_dict, filepath, verbose = False, preserve_stan
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # init a new HDU list and write the maps data into it
-    new_hdul = fits.HDUList([])
+    new_hdul = fits.HDUList([fits.PrimaryHDU()])
 
-    for name, (data, header_dict) in maps_dict.items():
-        header_dict_formatted = header_dict_formatter(header_dict=header_dict)
-        image_hdu = fits.ImageHDU(data=data, name=name)
+    if not isinstance(maps_dict_list, list):
+        raise ValueError(f"Parameter maps_dict_list must be a Python List")
+    
+    for maps_dict in maps_dict_list:
+        for name, (data, header_dict) in maps_dict.items():
+            header_dict_formatted = header_dict_formatter(header_dict=header_dict)
+            image_hdu = fits.ImageHDU(data=data, name=name)
+            for key, value in header_dict_formatted.items():
+                image_hdu.header[key] = value
 
-        for key, value in header_dict_formatted.items():
-            image_hdu.header[key] = value
-
-        image_hdu.header['UPDATED'] = (timestamp, "Last updated timestamp")
-        new_hdul.append(image_hdu)
-
-
+            image_hdu.header['UPDATED'] = (timestamp, "Last updated timestamp")
+            new_hdul.append(image_hdu)
 
     # if the file is not already made, write it with the mapsdict data
     if not os.path.isfile(full_path):
-        new_hdul.insert(0, fits.PrimaryHDU())
-
+        if preserve_standard_order:
+            new_hdul = reorder_hdu(new_hdul)
         util.verbose_print(verbose, f"Writing data to new file: {full_path}")
         new_hdul.writeto(full_path)
-
         util.verbose_print(verbose, "Done.")
     
-    # if the file exists, open it in update mode
+    # if the file exists, add any images from the existing file that are not being written by
+    # new_hdul to new_hdul
+    # overwrite the file
     else:
-        util.verbose_print(verbose, f"Found file: {full_path}")
-        with fits.open(full_path, mode='update') as existing_hdul:
-            util.verbose_print(verbose, f"Updating...")
-            # grab the extnames from the new hdu
-            existing_names = [hdu.name for hdu in existing_hdul]
+        util.verbose_print(verbose, f"Updating file: {full_path}")
+        existing_hdul = fits.open(full_path)
+        existing_names = [hdu.name for hdu in existing_hdul if hdu.name != 'PRIMARY']
+        new_hdu_names = [hdu.name for hdu in new_hdul if hdu.name != 'PRIMARY']
 
-            existing_name_output = []
-            new_name_output = []
-            # iterate through the new HDU list.
-            for new_hdu in new_hdul:
-                extname = new_hdu.name
+        existing_name_output = [name for name in existing_names if name not in new_hdu_names]
+        new_name_output = [name for name in new_hdu_names if name not in existing_names]
 
-                # If an HDU in the new list matches the existing data names, update the existing data with the new data
-                if extname in existing_names:
-                    existing_name_output.append(extname)
-                    existing_hdul[extname].data = new_hdu.data
-                    existing_hdul[extname].header['UPDATED'] = (timestamp, "Last updated timestamp")
-                
-                # otherwise, append the new data into the file
-                else:
-                    new_name_output.append(extname)
-                    existing_hdul.append(new_hdu)
+        for name in existing_names:
+            if name in new_hdu_names:
+                pass
+            else:
+                new_hdul.append(existing_hdul[name])
 
-            util.verbose_print(verbose, f"Updating file: {full_path}")
-            existing_hdul.flush(verbose=verbose)
-            if len(existing_name_output)>0:
-                util.verbose_print(verbose, f"Updated HDU Images: {existing_name_output}")
-            if len(new_name_output)>0:
-                util.verbose_print(verbose, f"Added HDU Images: {new_name_output}")
-            util.verbose_print(verbose, "Done.")
-#           
+        new_hdul = reorder_hdu(new_hdul)
+        new_hdul.writeto(full_path, overwrite=True)
+        util.verbose_print(verbose, 'Done.')
+        util.verbose_print(verbose, f"Updated Images: {existing_name_output}")
+        util.verbose_print(verbose, f"New Images: {new_name_output}")
+
+#       
 # 
 # Configuration Files Section
 # Parser and cleaner for reading .ini files

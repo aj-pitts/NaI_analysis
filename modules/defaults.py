@@ -140,13 +140,14 @@ def local_quality_flag():
     """
     
     flags = {0:'No mask',
-             1:'The bin contained spaxel(s) masked by the MANGA_DAPSPECMASK.',
-             2:'The bin contained spaxel(s) masked by the MANGA_DAPPIXMASK.',
+             1:'The bin contained spaxels masked by the MANGA_DAPSPECMASK.',
+             2:'The bin contained spaxels masked by the MANGA_DAPPIXMASK.',
              3:'The bin STELLAR_VEL exceeds the user-set threshold.',
-             4:'The computed value is NaN',
-             5:'The computed uncertainty is NaN',
-             6:'Spaxel not included in DAP',
-             7:'Bin S/N is below threshold',
+             4:'The computed value is NaN.',
+             5:'The computed uncertainty is NaN.',
+             6:'Spaxel not included in DAP.',
+             7:'Bin S/N is below threshold.',
+             8:'Measurement uncertainty is beyond user-set threshold.'
              }
     return flags
 
