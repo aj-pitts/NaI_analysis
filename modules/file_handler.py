@@ -10,6 +10,8 @@ import warnings
 import configparser
 from datetime import datetime
 from modules.util import verbose_print
+from tqdm import tqdm
+import yaml
 
 # TODO: update the docstring, add verbose printing, add better bc/nc option
 
@@ -19,7 +21,7 @@ from modules.util import verbose_print
 # 
 # 
 
-def init_datapaths(galname, bin_method, verbose=False):
+def init_datapaths(galname, bin_method, verbose=False, redshift = True):
     """
     Acquires the path(s) to the primary file(s) of a given galaxy by request.
 
@@ -72,12 +74,14 @@ def init_datapaths(galname, bin_method, verbose=False):
     mcmcpath = os.path.join(pipeline_data, "mcmc_outputs", galsubdir, corr_key, analysisplan)
     musecubepath = os.path.join(pipeline_data, "muse_cubes", galname)
     localdatapath = os.path.join(local_data, "local_outputs", galsubdir, corr_key, analysisplan)
+    localdatasubpath = os.path.join(localdatapath, "maps")
 
     outdict = {'CONFIG':None, 
                'LOGCUBE':None, 
                'MAPS':None, 
                'MCMC':None, 
-               'LOCAL':None}
+               'LOCAL':None,
+               'LOCAL_MAPS':None}
     
     ### CONFIG file
     configfils = glob(os.path.join(musecubepath, "*.ini"))
@@ -89,7 +93,14 @@ def init_datapaths(galname, bin_method, verbose=False):
             warnings.warn(f"{musecubepath} has more than one config file:\n{configfils} \nDefaulting to {configfils[0]}")
 
         outdict['CONFIG'] = configfils[0]
-        verbose_print(verbose, f"Using CONFIG File: {configfils[0]}")
+        verbose_print(verbose, f"'CONFIG' key: {configfils[0]}")
+        
+    if redshift:
+        configuration = parse_config(configfils[0], verbose=verbose)
+        redshift = configuration['z']
+        outdict['Z'] = float(redshift)
+        #verbose_print(verbose, f"Redshift z = {redshift} found in {configfils[0]}")
+        verbose_print(verbose, f"'Z' key: {redshift}")
 
     ### DAP files
     if not os.path.exists(dappath):
@@ -100,10 +111,10 @@ def init_datapaths(galname, bin_method, verbose=False):
             for fil in beta_corr_fils:
                 if 'LOGCUBE' in fil:
                     outdict['LOGCUBE'] = fil
-                    verbose_print(verbose, f"Using LOGCUBE File: {fil}")
+                    verbose_print(verbose, f"'LOGCUBE' key: {fil}")
                 if 'MAPS' in fil:
                     outdict['MAPS'] = fil
-                    verbose_print(verbose, f"Using MAPS File: {fil}")
+                    verbose_print(verbose, f"'MAPS' key: {fil}")
         else:
             util.verbose_warning(verbose, f"No LOGCUBE or MAPS found in {dappath}")
 
@@ -119,7 +130,7 @@ def init_datapaths(galname, bin_method, verbose=False):
         elif len(mcmc_subdirs)==1:
             mcmc_rundir = os.path.join(mcmcpath, mcmc_subdirs[0])
             mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
-            verbose_print(verbose, f"Using {len(mcmc_files)} MCMC Files found in: {mcmc_rundir}")
+            verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
 
         else:
             dated_dirs = []
@@ -140,7 +151,7 @@ def init_datapaths(galname, bin_method, verbose=False):
                 print("Most recent subdirectory:", most_recent_dir[0])
                 mcmc_rundir = os.path.join(mcmcpath, most_recent_dir[0])
                 mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
-                verbose_print(verbose, f"Using {len(mcmc_files)} MCMC Files found in: {mcmc_rundir}")
+                verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
             else:
                 print("No valid 'Run_YYYY-MM-DD' subdirectories found.")
 
@@ -156,9 +167,23 @@ def init_datapaths(galname, bin_method, verbose=False):
         if len(localfils) == 0:
             util.verbose_warning(verbose,f"No local data file found in {localdatapath}")
         else:
-            outdict['LOCAL'] = localfils
             for file in localfils:
-                verbose_print(verbose, f"Using LOCAL File: {file}")
+                if "local_maps" in file:
+                    outdict['LOCAL'] = file
+                    verbose_print(verbose, f"Using LOCAL File: {file}")
+        if outdict['LOCAL'] is None:
+            util.verbose_warning(verbose, f"*local_maps.fits file not found in {localdatapath}")
+
+    ### individual local maps
+    if not os.path.exists(localdatasubpath):
+        util.verbose_warning(verbose,f"Filepath does not exist: {localdatasubpath}")
+    else:
+        localfils = glob(os.path.join(localdatasubpath, "*.fits"))
+        if len(localfils) == 0:
+            util.verbose_warning(verbose,f"No map files in {localdatasubpath}")
+        else:
+            outdict['LOCAL_MAPS'] = localfils
+            verbose_print(f"'LOCAL' key: {len(localfils)} local maps found in {localdatasubpath}")
 
     return outdict
 
@@ -393,7 +418,6 @@ def header_dict_formatter(header_dict):
     dict
         A formatted dictionary ready for FITS headers, ensuring compliance with the 80-character rule.
     """
-
     def card_builder(key, value, comment):
         """
         Build an initial FITS header card string.
@@ -472,7 +496,8 @@ def simple_file_handler(galdir, maps_dict, filename, filepath, overwrite = True,
 #### TODO:
 # Add functionality to input a list of mapdicts
 # Add standard file image order
-def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve_standard_order = False):
+def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve_standard_order = False, 
+                     overwrite = False):
     """
     Handles the creation and updating of a FITS file containing galaxy map data.
 
@@ -524,6 +549,8 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
 
     def reorder_hdu(hdul):
         HDUL_order = ['SPATIAL_BINS', 
+                      'REDSHIFT', 'REDSHIFT_MASK', 'REDSHIFT_ERROR', 
+                      'NaI_SNR',
                       'EW_NAI', 'EW_NAI_MASK', 'EW_NAI_ERROR',
                       'SFRSD', 'SFRSD_MASK', 'SFRSD_ERROR',
                       'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
@@ -552,29 +579,30 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
     if not isinstance(maps_dict_list, list):
         raise ValueError(f"Parameter maps_dict_list must be a Python List")
     
-    for maps_dict in maps_dict_list:
+    iterator = tqdm(maps_dict_list, desc="Building FITS File") if verbose else maps_dict_list
+    for maps_dict in iterator:
         for name, (data, header_dict) in maps_dict.items():
             header_dict_formatted = header_dict_formatter(header_dict=header_dict)
             image_hdu = fits.ImageHDU(data=data, name=name)
             for key, value in header_dict_formatted.items():
                 image_hdu.header[key] = value
-
             image_hdu.header['UPDATED'] = (timestamp, "Last updated timestamp")
             new_hdul.append(image_hdu)
 
-    # if the file is not already made, write it with the mapsdict data
-    if not os.path.isfile(full_path):
+    # if the file is not already made or if overwrite is set to true, write it with the mapsdict data
+    if not os.path.isfile(full_path) or overwrite:
         if preserve_standard_order:
             new_hdul = reorder_hdu(new_hdul)
-        util.verbose_print(verbose, f"Writing data to new file: {full_path}")
-        new_hdul.writeto(full_path)
-        util.verbose_print(verbose, "Done.")
+        verbose_print(verbose, f"Writing data to file: {full_path}")
+        new_hdul.writeto(full_path, overwrite = True)
+        verbose_print(verbose, "Done.")
     
+
     # if the file exists, add any images from the existing file that are not being written by
     # new_hdul to new_hdul
     # overwrite the file
     else:
-        util.verbose_print(verbose, f"Updating file: {full_path}")
+        verbose_print(verbose, f"Updating file: {full_path}")
         existing_hdul = fits.open(full_path)
         existing_names = [hdu.name for hdu in existing_hdul if hdu.name != 'PRIMARY']
         new_hdu_names = [hdu.name for hdu in new_hdul if hdu.name != 'PRIMARY']
@@ -590,9 +618,9 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
 
         new_hdul = reorder_hdu(new_hdul)
         new_hdul.writeto(full_path, overwrite=True)
-        util.verbose_print(verbose, 'Done.')
-        util.verbose_print(verbose, f"Updated Images: {existing_name_output}")
-        util.verbose_print(verbose, f"New Images: {new_name_output}")
+        verbose_print(verbose, 'Done.')
+        verbose_print(verbose, f"Updated Images: {existing_name_output}")
+        verbose_print(verbose, f"New Images: {new_name_output}")
 
 #       
 # 
@@ -644,8 +672,8 @@ def parse_config(config_fil, verbose):
             config.read(config_fil)
             parsing = False
         except configparser.Error as e:
-            util.verbose_print(verbose, f"Error parsing file: {e}")
-            util.verbose_print(verbose, f"Cleaning {config_fil}")
+            verbose_print(verbose, f"Error parsing file: {e}")
+            verbose_print(verbose, f"Cleaning {config_fil}")
             clean_ini_file(config_fil, overwrite=True)
 
 
@@ -694,7 +722,30 @@ def clean_ini_file(input_file, overwrite=False):
     print("Done.")
 
 
+def threshold_parser(galname, bin_method):
+    thresholds_path = os.path.join(defaults.get_default_path('config'), 'thresholds.yaml')
+    with open(thresholds_path, "r") as f:
+        thresholds_file = yaml.safe_load(f)
+    
+    key = f'{galname}-{bin_method}'
+    if not key in thresholds_file.keys():
+        return None
 
+    threshold_dict = thresholds_file[key]
+    return threshold_dict
+
+
+def spatial_bin_header(galname, bin_method):
+    hduname = 'SPATIAL_BINS'
+
+    header = {
+        hduname:{
+            "DESC":(f"{galname}-{bin_method} binned spectra IDs",""),
+            "EXTNAME":(hduname, "Extension name"),
+            "AUTHOR":("K Westfall <westfall@ucolick.org> & SDSS-IV Data Group", "")
+        }
+    }
+    return header
 
 ### old location map_file_handler
 # if name in existing_names:

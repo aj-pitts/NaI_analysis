@@ -12,7 +12,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../modules/")))
-from util import check_filepath, clean_ini_file
+from modules.util import check_filepath
+from modules.file_handler import clean_ini_file, standard_header_dict, init_datapaths, map_file_handler
 
 def classify_ELR(elr_dict):
     if (elr_dict['oiii'] < 0.61 / (elr_dict['nii'] - 0.05) + 1.3) and (elr_dict['oiii'] < 0.72/(elr_dict['sii'] - 0.32) + 1.3) and (elr_dict['oiii'] < 0.73 / (elr_dict['oi'] + 0.59) + 1.33):

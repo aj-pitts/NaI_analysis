@@ -167,7 +167,8 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
         errormapfigname = os.path.join(fig_save_path, f"{figname}-map-error.{figext}")
         evmin = 0
         evmax = np.median(errormap[~errormask]) + 1 * np.std(errormap[~errormask])
-        error_string = r"$\sigma_{" + label[1:-1] + "}\ " + units[1:-1] + "$"
+        #error_string = r"$\sigma_{" + label[1:-1] + "}\ " + units[1:-1] + "$"
+        error_string = fr"$\sigma_{{{label[1:-1]}}}\ {units[1:-1]}$"
         
         errormap[errormask] = np.nan
         plt.figure()
@@ -188,6 +189,9 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
         verbose_print(verbose,f"{galname} {fig_keyword} uncertainty map plot saved to {errormapfigname}")
         
 
+
+def dap_maps(galname: str, bin_method: str, verbose = False):
+    return None
 
 
 

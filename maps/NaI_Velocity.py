@@ -11,188 +11,10 @@ import argparse
 from tqdm import tqdm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from modules import defaults, file_handler, util, plotter
+import mcmc_results
 
 
-def get_ew_cut(snr):
-    if snr<= 30:
-        return np.inf
-    elif snr <= 60:
-        return 1.0
-    elif snr <= 90:
-        return 0.8
-    else:
-        return 0.6
-
-def NaD_snr_map(cube_fil, maps_fil, z_guess, verbose=False):
-    cube = fits.open(cube_fil)
-    maps = fits.open(maps_fil)
-    if cube['primary'].header['dapqual'] == 30:
-        raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
-    
-
-    spatial_bins = cube['BINID'].data[0]
-    fluxcube = cube['FLUX'].data
-    ivarcube = cube['IVAR'].data
-    wave = cube['WAVE'].data
-
-    stellarvel = maps['STELLAR_VEL'].data
-    stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
-    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
-
-
-    z = np.zeros_like(stellarvel)
-    c = 2.998e5
-    for ID in np.unique(spatial_bins):
-        w = ID == spatial_bins
-        sv = stellarvel[w][0]
-        z[w] = (sv * (1+z_guess))/c + z_guess
-
-    snr_map = np.zeros_like(stellarvel)
-    #region = (5880, 5910)
-    windows = [(5865, 5875), (5915, 5925)]
-
-    items = np.unique(spatial_bins)
-    iterator = tqdm(np.unique(spatial_bins), desc="Constructing S/N Map") if verbose else items
-    for ID in iterator:
-        w = ID == spatial_bins
-        y_inds, x_inds = np.where(w)
-        
-        z_bin = z[w][0]
-        wave_bin = wave / (1+z_bin)
-
-        #wave_window = (wave_bin>=region[0]) & (wave_bin<=region[1])
-        wave_window = (wave_bin>=windows[0][0]) & (wave_bin<=windows[0][1]) | (wave_bin>=windows[1][0]) & (wave_bin<=windows[1][1])
-        wave_inds = np.where(wave_window)[0]
-        
-        flux_arr = fluxcube[wave_inds, y_inds[0], x_inds[0]]
-        ivar_arr = ivarcube[wave_inds, y_inds[0], x_inds[0]]
-        sigma_arr = 1/np.sqrt(ivar_arr)
-
-
-        snr_map[w] = np.median(flux_arr / sigma_arr)
-
-    return snr_map
-
-
-
-def combine_mcmc_results(mcmc_paths, verbose=False):
-    def extract_run_number(filepath):
-        match = re.search(r"-run-(\d+)\.fits$", filepath)
-        return int(match.group(1)) if match else float('inf')
-    
-    sorted_paths = sorted(mcmc_paths, key=extract_run_number)
-
-    records = []
-    dtype=[
-        ('id', int), 
-        ('bin', int), 
-        ('velocities', float),
-        ('lambda samples', object), 
-        ('percentiles', object)
-    ]
-
-    items = sorted_paths
-    iterator = tqdm(sorted_paths, desc="Combining MCMC results") if verbose else items
-
-    for mcmc_fil in iterator:
-        data = fits.open(mcmc_fil)
-        data_table = Table(data[1].data)
-
-        bins = data_table['bin']
-        percentiles = data_table['percentiles']
-        velocities = data_table['velocities']
-        lambda_samples = np.array([row_samples[:,1000:,0].flatten() for row_samples in data_table['samples']])
-        ids = np.arange(len(records), len(data_table)+len(records))
-
-        records.extend(zip(ids, bins, velocities, lambda_samples, percentiles))
-
-    return np.array(records, dtype=dtype)
-
-
-def make_mcmc_results_cube(cube_fil, mcmc_table, verbose=False):
-    cube = fits.open(cube_fil)
-    if cube['primary'].header['dapqual'] == 30:
-        raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
-
-    spatial_bins = cube['binid'].data[0]
-
-    results_cube = np.zeros((4, spatial_bins.shape[0], spatial_bins.shape[1]))
-    error_16th_percentile_cube = np.zeros_like(results_cube)
-    error_84th_percentile_cube = np.zeros_like(results_cube)
-
-    bins, inds = np.unique(mcmc_table['bin'],return_index=True)
-    zipped_items = zip(bins,inds)
-    iterator = tqdm(zipped_items, desc="constructing MCMC results cube") if verbose else zipped_items
-
-    for ID, ind in iterator:
-        if ID == -1:
-            continue
-        w = spatial_bins == ID
-        y, x = np.where(w)
-
-        percentiles = mcmc_table[ind]['percentiles']
-
-        for i,cube in enumerate([results_cube, error_16th_percentile_cube, error_84th_percentile_cube]):
-            cube[:,y,x] = percentiles[:,i, np.newaxis]
-            
-
-    mcmc_dict = {"MCMC Results":results_cube, "MCMC 16th Percentile":error_16th_percentile_cube, "MCMC 84th Percentile":error_84th_percentile_cube}
-
-    HDU_name = "MCMC_RESULTS"
-    mcmc_header_dict = {
-        HDU_name:{
-            "DESC":(f"{args.galname} {HDU_name.replace("_"," ")} Cube",""),
-            "C01":("lambda_0", "Data in channel 1"),
-            "C02":("log_N", "Data in channel 2"),
-            "C03":("b_D", "Data in channel 3"),
-            "C04":("C_f", "Data in channel 4"),
-            "HDUCLASS":("CUBE", "Data format"),
-            "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
-            "BUNIT_04":(" ", "Unit of pixel value in C04"),
-            "ERRDATA1":(f"MCMC_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
-            "ERRDATA2":(f"MCMC_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
-            "EXTNAME":(HDU_name, "Extension name"),
-            "AUTHOR":("Andrew Pitts","")
-        },
-        f"MCMC_16TH_PERC":{
-            "DESC":(f"{args.galname} {HDU_name.replace("_"," ")} 16th percentile uncertainty",""),
-            "C01":("lambda_0", "Data in channel 1"),
-            "C02":("log_N", "Data in channel 2"),
-            "C03":("b_D", "Data in channel 3"),
-            "C04":("C_f", "Data in channel 4"),
-            "HDUCLASS":("CUBE", "Data format"),
-            "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
-            "BUNIT_04":(" ", "Unit of pixel value in C04"),
-            "DATA":(HDU_name, "Associated data extension"),
-            "ERRDATA2":(f"MCMC_84TH_PERC", "Associated 84th percentile uncertainty values extension"),
-            "EXTNAME":(f"MCMC_16TH_PERC", "Extension name"),
-            "AUTHOR":("Andrew Pitts","")
-        },
-        f"MCMC_84TH_PERC":{
-            "DESC":(f"{args.galname} {HDU_name.replace("_"," ")} 84th percentile uncertainty",""),
-            "C01":("lambda_0", "Data in channel 1"),
-            "C02":("log_N", "Data in channel 2"),
-            "C03":("b_D", "Data in channel 3"),
-            "C04":("C_f", "Data in channel 4"),
-            "HDUCLASS":("CUBE", "Data format"),
-            "BUNIT_01":("Angstrom", "Unit of pixel value in C01"),
-            "BUNIT_02":("1 / cm^2", "Unit of pixel value in C02"),
-            "BUNIT_03":("km / s", "Unit of pixel value in C03"),
-            "BUNIT_04":(" ", "Unit of pixel value in C03"),
-            "DATA":(HDU_name, "Associated data extension"),
-            "ERRDATA1":(f"MCMC_16TH_PERC", "Associated 16th percentile uncertainty values extension"),
-            "EXTNAME":(f"MCMC_84TH_PERC", "Extension name"),
-            "AUTHOR":("Andrew Pitts","")
-        }
-    }
-    return mcmc_dict, mcmc_header_dict
-
-
-def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
+def make_vmap(cube_fil, maps_fil, mcmc_table, verbose=False):
     cube = fits.open(cube_fil)
     maps = fits.open(maps_fil)
     if cube['primary'].header['dapqual'] == 30:
@@ -206,10 +28,6 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
     stellarvel = maps['STELLAR_VEL'].data
     stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
 
-    ew_hdul = fits.open(EW_file)
-    ewmap = ew_hdul['EQ_WIDTH_NAI'].data
-    ewmap_mask = ew_hdul['EQ_WIDTH_NAI_MASK'].data
-
     vel_map = np.zeros(binid.shape) - 999.
 
     vel_map_error = np.zeros((2, binid.shape[0], binid.shape[1])) - 999.
@@ -219,12 +37,7 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
     
     ### TODO ###
     stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
-    ewmap_error = ew_hdul['EQ_WIDTH_NAI_ERR'].data 
     ############
-
-    # compute the Na D S/N
-    if args.mask:
-        snrmap = NaD_snr_map(cube_fil, maps_fil, redshift, verbose=verbose)
 
     ## mask unused spaxels
     w = binid == -1
@@ -242,16 +55,6 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
         bin_check = util.check_bin_ID(ID, binid, DAPPIXMASK_list=[stellarvel_mask], stellar_velocity_map=stellarvel)
         vmap_mask[w] = bin_check
 
-        if args.mask:
-            if np.median(ewmap_mask[w]).astype(bool):
-                pass
-            else:
-                sn = snrmap[w][0]
-                ew_cut = get_ew_cut(sn)
-                ew = ewmap[w][0]
-
-                if ew<ew_cut:
-                    vmap_mask[w] = 7
 
         velocity = mcmc_table[ind]['velocities']
         lambda_samples = mcmc_table[ind]['lambda samples']
@@ -286,7 +89,45 @@ def make_vmap(cube_fil, maps_fil, EW_file, mcmc_table, redshift, verbose=False):
     return vmap_dict
 
 
-def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose=False):
+def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ewmap, ewmap_mask, snrmap, verbose = False):
+
+    threshold_dict = file_handler.threshold_parser(galname, bin_method)
+
+    ## function to return the ew threshold
+    def get_ew_cut(snr, threshold_dict):
+        snr_lims = threshold_dict['snr']
+        ew_lims = threshold_dict['ew']
+
+        for i, sn_lim in enumerate(snr_lims):
+            if snr <= sn_lim:
+                return np.inf if ew_lims[i] == 'inf' else ew_lims[i]
+            
+        return ew_lims[-1]
+
+
+    ## iterate the bins
+    items = np.unique(spatial_bins)[1:]
+    iterator = tqdm(items, desc="Masking velocities by EW and S/N threshold") if verbose else items
+
+    for ID in iterator:
+        w = ID == spatial_bins
+        ny, nx = np.where(w)
+        y, x = ny[0], nx[0]
+
+        # if the ew was masked, mask the velocity
+        if np.median(ewmap_mask[w]).astype(bool):
+            velocity_map_mask[w] = 7
+            continue
+        
+        # apply the limit
+        sn = snrmap[y, x]
+        ew_cut = get_ew_cut(sn, threshold_dict)
+
+        if ewmap[y, x] < ew_cut:
+            velocity_map_mask[w] = 7
+
+
+def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
     cube = fits.open(cube_fil)
 
     binid = cube['BINID'].data[0]
@@ -390,26 +231,25 @@ def main(args):
     if mcmcfils is None or len(mcmcfils)==0:
         raise ValueError(f"No MCMC Reults found.")
 
-    ew_files = [f for f in os.listdir(gal_local_dir) if 'EW-map.fits' in f]
-    if ew_files:
-        ew_file = os.path.join(gal_local_dir,ew_files[0])
-        util.verbose_print(verbose, f"Using EW File: {ew_file}")
+    local_fp = [f for f in os.listdir(gal_local_dir) if 'local_maps.fits' in f]
+    if local_fp:
+        local_file = os.path.join(gal_local_dir, local_fp[0])
+        util.verbose_print(verbose, f"Using Local Maps File: {local_file}")
     else:
-        raise FileNotFoundError(f"No file containing 'EW-Map.fits' found in {gal_local_dir} \ncontents: {os.listdir(gal_local_dir)}")
+        raise FileNotFoundError(f"No file containing 'local_maps.fits' found in {gal_local_dir} \ncontents: {os.listdir(gal_local_dir)}")
 
 
 
     # combine the mcmc fits files into an astropy table
-    mcmc_table = combine_mcmc_results(mcmc_paths=mcmcfils, verbose=verbose)
+    mcmc_table = mcmc_results.combine_mcmc_results(mcmc_paths=mcmcfils, verbose=verbose)
 
     # write mcmc results into datacubes
-    mcmc_dict, mcmc_header_dict = make_mcmc_results_cube(cubefil, mcmc_table, verbose=verbose)
+    mcmc_dict, mcmc_header_dict = mcmc_results.make_mcmc_results_cube(args.galname, cubefil, mcmc_table, verbose=verbose)
 
     # measure Doppler V of line center
-    vmap_dict = make_vmap(cubefil, mapsfil, ew_file, mcmc_table, redshift, verbose)
+    vmap_dict = make_vmap(cubefil, mapsfil, local_file, mcmc_table, redshift, verbose)
     term_vmap_dict = make_terminal_vmap(vmap_dict=vmap_dict, mcmc_dict=mcmc_dict, cube_fil=cubefil, 
                                         verbose=verbose)
-
 
     # structure the data for writing
     velocity_hduname = "V_NaI"
@@ -417,8 +257,6 @@ def main(args):
     additional_units = ['']
     additinoal_description = ['Fractional confidence of NaI_VELOCITY']
     units = "km / s"
-
-    mcmc_mapdict = file_handler.standard_map_dict(args.galname, mcmc_dict, custom_header_dict=mcmc_header_dict)
 
     velocity_mapdict = file_handler.standard_map_dict(args.galname, vmap_dict, HDU_keyword=velocity_hduname, IMAGE_units=units,
                                                       additional_keywords=additional_data, additional_units=additional_units, 
@@ -432,7 +270,7 @@ def main(args):
     # write the data
     gal_dir = f"{args.galname}-{args.bin_method}"
 
-    file_handler.map_file_handler(gal_dir, [velocity_mapdict, velocity_outflow_max_dict, mcmc_mapdict], 
+    file_handler.map_file_handler(gal_dir, [velocity_mapdict, velocity_outflow_max_dict], 
                                   gal_local_dir, verbose=args.verbose)
     
     # make the plots

@@ -4,7 +4,13 @@ import argparse
 import numpy as np
 from modules import util, file_handler, defaults
 
-def write_fluxes(mapsfile, output_file, verbose=False):
+def write_fluxes(mapsfile, local_maps_file, output_file, verbose=False):
+    if not os.path.exists(local_maps_file):
+        util.verbose_warning(verbose, f'Local maps file does not exist: {local_maps_file}\nIgnoring...')
+        local_maps = None
+    else:
+        local_maps = fits.open(local_maps_file)
+    
     maps = fits.open(mapsfile)
 
     emline_key = 'EMLINE_GFLUX'
