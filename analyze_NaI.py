@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('-v', '--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
+    parser.add_argument('--plotter', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
     parser.add_argument('-m', '--mask', help = "Mask velocities by S/N & EW combination configuration (default: False)", action='store_true',default=False)
     parser.add_argument('--noplot', help = "Flag to ignore plotting Maps (default: False)", action='store_true', default=False)
     
@@ -34,8 +35,6 @@ def main(args):
     analysis_plan = defaults.analysis_plans()
     corr_key = 'BETA-CORR'
 
-    repodir = os.path.dirname(os.path.abspath(__file__))
-    pipeline_data = defaults.get_data_path(subdir='pipeline')
     local_data = defaults.get_data_path(subdir='local')
     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose, redshift=True)
 
@@ -45,17 +44,25 @@ def main(args):
     mcmcfiles = datapath_dict['MCMC']
 
     cube_hdu = fits.open(cubefile)
+    maps_hdu = fits.open(mapsfile)
+
+    radius = maps_hdu['bin_lwellcoo'].data[1]
+    radius_mapdict = {"RADIUS":radius}
+    radius_header = file_handler.use_sdss_header(galname, bin_method, "RADIUS", maps_hdu['bin_lwellcoo'].header, desc="radius map", 
+                                                 remove_keywords=['C1', 'U1', 'C3', 'U3', 'C4', 'U4'])
+    radius_dict = file_handler.standard_map_dict(galname, radius_mapdict, custom_header_dict=radius_header)
 
     binids = cube_hdu['BINID'].data
     spatial_bins = binids[0]
+
     spatial_bins_mapdict = {"SPATIAL_BINS":spatial_bins}
-    spatial_bins_header = file_handler.spatial_bin_header(galname, bin_method)
+    spatial_bins_header = file_handler.use_sdss_header(galname, bin_method, "SPATIAL_BINS", cube_hdu['binid'].header, "spatial bin IDs",
+                                                       remove_keywords=['C2', 'C3', 'C4', 'C5'])
     spatial_bins_dict = file_handler.standard_map_dict(galname, spatial_bins_mapdict, custom_header_dict=spatial_bins_header)
 
     ## output directories
     output_dir = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plan)
     gal_figures_dir = os.path.join(output_dir, 'figures')
-    dap_figures_dir = os.path.join(gal_figures_dir, 'dap')
     inspect_figures_dir = os.path.join(gal_figures_dir, 'inspection')
     results_figures_dir = os.path.join(gal_figures_dir, 'results')
 
@@ -89,21 +96,21 @@ def main(args):
     vmap_dict = maps.NaI_Velocity.make_vmap(cubefile, mapsfile, mcmc_table, verbose=verbose)
 
     if args.mask:
-        print('Masking velocities')
+        print('Applying user set thresholds to velocity mask')
         maps.NaI_Velocity.apply_velocity_mask(galname, bin_method, spatial_bins, vmap_dict['Vel Map Mask'], 
                                             ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map['NaI_SNR'], verbose=verbose)
         
         threshold_dict = file_handler.threshold_parser(galname, bin_method)
 
         util.verbose_print(verbose, 'Updating V vs EW plots')
-        inspect.inspect_vel_ew(ewmap=ewmap_dict['EW Map'], vmap=vmap_dict['Vel Map'], snrmap=snr_map["NaI_SNR"], spatial_bins=spatial_bins,
-                               fig_save_dir=inspect_figures_dir, thresholds=threshold_dict['ew'])
+        inspect.inspect_vel_ew(ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map["NaI_SNR"], vmap_dict['Vel Map'], 
+                               spatial_bins, inspect_figures_dir, thresholds=threshold_dict['ew'], verbose = verbose)
     else:
         print(f"Not masking velocities by threshold. Plotting velocity versus eq_w")
-        inspect.inspect_vel_ew(ewmap=ewmap_dict['EW Map'], vmap=vmap_dict['Vel Map'], snrmap=snr_map["NaI_SNR"], spatial_bins=spatial_bins,
-                               fig_save_dir=inspect_figures_dir)
+        inspect.inspect_vel_ew(ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map["NaI_SNR"], vmap_dict['Vel Map'], 
+                               spatial_bins, inspect_figures_dir, verbose = verbose)
         
-
+    
     velocity_hduname = "V_NaI"
     additional_data = ["V_NaI_FRAC"]
     additional_units = ['']
@@ -122,31 +129,39 @@ def main(args):
 
     util.verbose_print(verbose, f"Analysis Complete!\nPreparing to write data to {output_dir}.")
 
-    mapdict_list = [spatial_bins_dict, redshift_mapdict, snr_mapdict, ew_mapdict, sfr_mapdict, mcmc_cubedict, velocity_mapdict, terminal_velocity_mapdict]
+    mapdict_list = [spatial_bins_dict, radius_dict, redshift_mapdict, snr_mapdict, ew_mapdict, sfr_mapdict, mcmc_cubedict, velocity_mapdict, terminal_velocity_mapdict]
     file_handler.map_file_handler(f"{galname}-{bin_method}", mapdict_list, 
                                   output_dir, verbose=verbose, preserve_standard_order= True, overwrite=True)
 
 
     if not args.noplot:
         util.check_filepath(results_figures_dir, mkdir=True, verbose=verbose)
-        util.verbose_print(verbose, f"Creating plots...")
+        plotter.standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=verbose)
 
-        plotter.map_plotter(ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], results_figures_dir, 'EW_NAI', r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$',
-                    galname, bin_method, verbose=verbose, error=ewmap_dict['EW Map Uncertainty'], vmin=-0.2,vmax=1.5, s=1)
-        
-        plotter.map_plotter(sfr_dict['SFRSD Map'], sfr_dict['SFRSD Mask'], results_figures_dir, 'SFRSD', r"$\mathrm{log \Sigma_{SFR}}$", r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$",
-                        args.galname, args.bin_method, verbose=verbose, vmin=-2.5, vmax=0, cmap='rainbow')
-        
-        plotter.map_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], results_figures_dir, 'V_NaI', r"$v_{\mathrm{Na\ D}}$",
-                        r"$\left( \mathrm{km\ s^{-1}} \right)$", galname, bin_method, verbose=verbose, vmin=-200, vmax=200, cmap='seismic')
-        
         if args.mask:
-            inspect.velocity_vs_sfr(galname, bin_method, results_figures_dir, terminal_velocity=True, power_law=True, 
+            inspect.velocity_vs_sfr(galname, bin_method, terminal_velocity=True, power_law=True, 
                                     pearson=True, contours=True, incidence=True, verbose=verbose)
 
+
+def plot_only(args):
+    galname = args.galname
+    bin_method = args.bin_method
+    verbose = args.verbose
+    corr_key = 'BETA-CORR'
+
+    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose, redshift=True)
+
+    mapsfile = datapath_dict['MAPS']
+    plotter.standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=verbose)
+    inspect.velocity_vs_sfr(galname, bin_method, terminal_velocity=True, power_law=True, 
+                                    pearson=True, contours=True, incidence=True, verbose=verbose)
 
 
 if __name__ == "__main__":
     warnings.filterwarnings('ignore')
     args = get_args()
-    main(args)
+
+    if args.plotter:
+        plot_only(args)
+    else:
+        main(args)

@@ -1,9 +1,12 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.io import fits
+
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import modules.defaults as defaults
 import modules.util as util
+import modules.inspect as inspect
 from modules.util import verbose_print
 
 import bokeh.plotting as bp
@@ -13,8 +16,111 @@ from bokeh.transform import linear_cmap
 from bokeh.io import output_file, show, save
 from bokeh.models import BasicTicker, ColorBar
 
-def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_keyword: str, label: str, units: str, galname: str, 
-             bin_method: str, verbose = True, **kwargs):
+
+def standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=False):
+    analysis_plans = defaults.analysis_plans()
+
+    local_data = defaults.get_data_path(subdir='local')
+    local_outputs = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plans)
+    local_maps_path = os.path.join(local_outputs, f"{galname}-{bin_method}-local_maps.fits")
+
+    figures_dir = os.path.join(local_outputs, 'figures')
+    results_dir = os.path.join(figures_dir, 'results')
+    dap_figures_dir = os.path.join(figures_dir, 'dap')
+
+    hdul = fits.open(local_maps_path)
+
+    util.verbose_print(verbose, "Creating plots...")
+
+    map_plotter(galname, bin_method, hdul['ew_nai'].data, 'EW_NAI', results_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
+                -0.2, 1.5, mask = hdul['ew_nai_mask'].data, histogram=True, verbose=verbose)
+    
+    map_plotter(galname, bin_method, hdul['sfrsd'].data, 'SFRSD', results_dir, r"$\mathrm{log \Sigma_{SFR}}$", r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$",
+                'rainbow', -2.5, 0, mask = hdul['sfrsd_mask'].data, histogram=True, verbose=verbose)
+    
+    map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI_masked', results_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
+                -250, 250, mask=hdul['v_nai_mask'].data, minmax=True, mask_ignore_list=[8], histogram=True, verbose=verbose)
+    
+    map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI', results_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
+                -200, 200, minmax=True, histogram=True, verbose=verbose)
+
+    inspect.dap_maps(galname, bin_method, mapsfile, dap_figures_dir, verbose = verbose)
+
+
+
+
+def map_plotter(galname, bin_method, image, fig_keyword, save_path, label, units, cmap, vmin = None, vmax = None,
+                mask = None, mask_ignore_list = None, minmax = False, histogram = True, verbose = True):
+    
+    image_name = f'{galname}-{bin_method}-{fig_keyword}.pdf'
+    fig_path = os.path.join(save_path, image_name)
+
+    plt.style.use(defaults.matplotlib_rc())
+    
+    ####### 2D Map #########
+    image_mask = np.zeros(image.shape).astype(bool)
+    if mask is not None:
+        image_mask = mask.astype(bool)
+
+        if mask_ignore_list is not None:
+            for i in mask_ignore_list:
+                image_mask[image_mask == i] = 0
+
+    boundary_mask = np.zeros(image.shape).astype(bool)
+    if minmax:
+        boundary_mask = (image<vmin) | (image>vmax)
+    
+    plotmap = np.copy(image)
+    plot_mask = np.logical_or(image_mask, boundary_mask)
+    plotmap[plot_mask] = np.nan
+
+    value_string = f"{label} {units}"
+
+    plt.figure()
+    im = plt.imshow(plotmap,cmap=cmap,vmin=vmin,vmax=vmax,origin='lower',
+               extent=[32.4, -32.6,-32.4, 32.6])
+    plt.xlabel(r'$\Delta \alpha$ (arcsec)')
+    plt.ylabel(r'$\Delta \delta$ (arcsec)')
+    ax = plt.gca()
+    ax.set_facecolor('lightgray')
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("top", size="5%", pad=0.01)
+
+    cbar = plt.colorbar(im,cax=cax,orientation = 'horizontal')
+    cbar.set_label(value_string,fontsize=15,labelpad=-55)
+    cax.xaxis.set_ticks_position('top')
+    
+
+    plt.savefig(fig_path, bbox_inches='tight')
+    plt.close()
+    verbose_print(verbose, f"{galname} {fig_keyword} map plot saved to {fig_path}")
+
+
+    ####### Histogram #######
+    if histogram:
+        hist_name = f'{galname}-{bin_method}-{fig_keyword}-hist.pdf'
+        hist_path = os.path.join(save_path, hist_name)
+
+        masked_data = image[~image_mask]
+        median = np.median(masked_data)
+        standard_deviation = np.std(masked_data)
+
+        bin_width = 3.5 * standard_deviation / (masked_data.size ** (1/3))
+        nbins = (max(masked_data) - min(masked_data)) / bin_width
+        plt.figure()
+        plt.hist(masked_data,bins=int(nbins),color='k')
+        plt.xlabel(label)
+        plt.ylabel(r"$N_{\mathrm{bins}}$")
+        plt.xlim(median - 7 * standard_deviation, median + 7 * standard_deviation)
+
+        plt.savefig(hist_path, bbox_inches='tight')
+        plt.close()
+        print(f"{galname} {fig_keyword} histogram saved to {hist_path}")
+
+
+
+def map_plotter_old(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_keyword: str, label: str, units: str, galname: str, 
+             bin_method: str, ignore_mask_list = None, verbose = True, **kwargs):
     """
     Creates the set of 2D "maps" for a given measurement distribution using `matplotlib.pyplot`.
 
@@ -84,6 +190,10 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
     ### handle required arguments
     value_string = f"{label} {units}"
 
+    if ignore_mask_list:
+        for i in ignore_mask_list:
+            mask[mask == i] = 0
+    
     image_mask = mask.astype(bool)
 
     masked_data = image[~image_mask]
@@ -141,10 +251,14 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
     ## custom
     vmin = kwargs.get('vmin', None)
     vmax = kwargs.get('vmax', None)
+    minmax = kwargs.get('minmax', False)
 
     if vmin is not None or vmax is not None:
         stdcustfigname = os.path.join(fig_save_path, f"{figname}-custom-map.{figext}")
         plt.figure()
+        if minmax:
+            w = (image>vmax) & (image<vmin)
+            plotmap[w] = np.nan
         im = plt.imshow(plotmap,cmap=cmap,vmin=vmin,vmax=vmax,origin='lower',
                extent=[32.4, -32.6,-32.4, 32.6])
         plt.xlabel(r'$\Delta \alpha$ (arcsec)')
@@ -169,7 +283,7 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
         evmax = np.median(errormap[~errormask]) + 1 * np.std(errormap[~errormask])
         #error_string = r"$\sigma_{" + label[1:-1] + "}\ " + units[1:-1] + "$"
         error_string = fr"$\sigma_{{{label[1:-1]}}}\ {units[1:-1]}$"
-        
+
         errormap[errormask] = np.nan
         plt.figure()
         im = plt.imshow(errormap,cmap=cmap,vmin=evmin,vmax=evmax,origin='lower',
@@ -187,11 +301,6 @@ def map_plotter(image: np.ndarray, mask: np.ndarray, fig_save_path: str, fig_key
         plt.savefig(errormapfigname,bbox_inches='tight')
         plt.close()
         verbose_print(verbose,f"{galname} {fig_keyword} uncertainty map plot saved to {errormapfigname}")
-        
-
-
-def dap_maps(galname: str, bin_method: str, verbose = False):
-    return None
 
 
 

@@ -10,6 +10,9 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from matplotlib import gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+
 
 
 from modules import defaults
@@ -18,6 +21,10 @@ from modules.util import verbose_print, verbose_warning, check_filepath
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
+
+import string
+
+from tqdm import tqdm
 
 
 def inspect_bin(galname, bin_method, bin_list, cube_file, map_file, redshift, local_file = None, show_norm = False, verbose = False, QtAgg = True, save = True):
@@ -162,7 +169,7 @@ def inspect_bin(galname, bin_method, bin_list, cube_file, map_file, redshift, lo
             plt.show()
 
 
-def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ranges = True, contour = True, thresholds = None, 
+def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, contour = True, thresholds = None, 
                    verbose = False):
         check_filepath(fig_save_dir, mkdir=True, verbose=verbose)
         plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
@@ -170,11 +177,19 @@ def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ra
         out_file = os.path.join(fig_save_dir, 'vel_thresholds.pdf')
         out_file_plotly = os.path.join(fig_save_dir, 'vel_thresholds_binned.pdf')
 
-        fig, ax = plt.subplots(2,2, sharey=True, sharex=False, figsize=(12,12))
-        binarr = spatial_bins.flatten()
-        snarr = snrmap.flatten()
-        ewarr = ewmap.flatten()
-        velarr = vmap.flatten()
+
+        mask = np.logical_or(np.logical_or(ewmap_mask.astype(bool),  (vmap == -999)), np.logical_or((ewmap == -999), (snrmap == -999)))
+
+        masked_bins = spatial_bins[~mask]
+        masked_snr = snrmap[~mask]
+        masked_ew = ewmap[~mask]
+        masked_vel = vmap[~mask]
+
+        _, bin_inds = np.unique(masked_bins, return_index=True)
+        
+        snarr = masked_snr[bin_inds]
+        ewarr = masked_ew[bin_inds]
+        velarr = masked_vel[bin_inds]
 
         #snr_stats = (int(np.median(snarr) - 0.3 * np.std(snarr)), int(np.median(snarr)), int(np.median(snarr) + np.std(snarr)), np.ceil(np.max(snarr)))
         #snranges = [(0, snr_stats[0]), (snr_stats[0], snr_stats[1]), (snr_stats[1], snr_stats[2]), (snr_stats[2], snr_stats[3])]
@@ -183,36 +198,24 @@ def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ra
 
         verbose_print(verbose, f"Creating velocity versus EW plots")
 
+        fig, ax = plt.subplots(2,2, sharey=True, sharex=False, figsize=(12,12))
         for i, a in enumerate(fig.get_axes()):
             sn_range = snranges[i]
-            w_sn = (snarr > sn_range[0]) & (snarr <= sn_range[1])
-            w = (w_sn) & (ewarr!=-999) & (velarr !=-999)
-
-            true_bins = np.unique(binarr[w])
+            w = (snarr > sn_range[0]) & (snarr <= sn_range[1])
             
-            vels_cleaned = []
-            ews_cleaned = []
-
-            for bin_id in true_bins:
-                binmask = (bin_id == binarr) & w
-                vels_cleaned.append(np.median(velarr[binmask]))
-                ews_cleaned.append(np.median(ewarr[binmask]))
-            
-            vels_cleaned = np.array(vels_cleaned)
-            ews_cleaned = np.array(ews_cleaned)
-            
-            a.scatter(ews_cleaned, vels_cleaned, s=0.5)
+            a.scatter(ewarr[w], velarr[w], s=0.5)
             a.set_title(rf"${sn_range[0]} < S/N \leq {sn_range[1]}$")
-            ewmin = np.floor(np.median(ews_cleaned) - 3 * np.std(ews_cleaned))
-            ewmax = np.ceil(np.median(ews_cleaned) + 3 * np.std(ews_cleaned))
+
+            ewmin = np.floor(np.median(ewarr[w]) - 3 * np.std(ewarr[w]))
+            ewmax = np.ceil(np.median(ewarr[w]) + 3 * np.std(ewarr[w]))
             a.set_xlim(ewmin,ewmax)
             a.set_ylim(-750, 750)
 
-            a.grid(visible=True)
+            a.grid(visible=True, linewidth=0.5, zorder=0)
             if thresholds is not None:
-                vline = thresholds[i]
-                if vline is not None:
-                    a.vlines(vline, -1000, 1000, linestyle='dashed', color='dimgrey', lw=1, label=rf'{vline} $\mathrm{{\AA}}$')
+                vline = thresholds[i] 
+                if vline != 'None':
+                    a.vlines(vline, -1000, 1000, linestyle='dashed', color='k', lw=1.5, label=rf'{vline} $\mathrm{{\AA}}$')
                     a.legend(frameon=False, loc='upper right')
             
         fig.text(0.5, 0, r'$\mathrm{EW_{Na\ D}}\ (\mathrm{\AA})$', ha='center',va='center',fontsize=20)
@@ -232,30 +235,15 @@ def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ra
             # Iterate through S/N ranges and create contours
             for i, sn_range in enumerate(snranges):
                 # Apply S/N range and data cleaning
-                w_sn = (snarr > sn_range[0]) & (snarr <= sn_range[1])
-                w = w_sn & (ewarr != -999) & (velarr != -999)
+                w = (snarr > sn_range[0]) & (snarr <= sn_range[1])
 
-                true_bins = np.unique(binarr[w])
-                
-                vels_cleaned = []
-                ews_cleaned = []
-
-                for bin_id in true_bins:
-                    binmask = (bin_id == binarr) & w
-                    vels_cleaned.append(np.median(velarr[binmask]))
-                    ews_cleaned.append(np.median(ewarr[binmask]))
-                
-                
-                vels_cleaned = np.array(vels_cleaned)
-                ews_cleaned = np.array(ews_cleaned)
-                
                 # Create 2D histogram for contour plot
-                npoints = vels_cleaned.size
+                npoints = velarr[w].size
                 points_per_bin = 75
                 nbins = npoints/points_per_bin
                 nbins = int(nbins) if nbins >= 1 else 1
 
-                z = np.histogram2d(ews_cleaned, vels_cleaned, bins=nbins, range=[[-1, 3], [-750, 750]])[0]
+                z = np.histogram2d(ewarr[w], velarr[w], bins=nbins, range=[[-1, 3], [-750, 750]])[0]
                 
                 verbose_print(verbose, f"Plotting contours with {int(nbins)} bins")
 
@@ -298,7 +286,7 @@ def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ra
                     )
                 fig.add_annotation(
                     x=1.6, y=300,
-                    text=rf'$N_{{\mathrm{{points}}}} = {len(vels_cleaned)}$',
+                    text=rf'$N_{{\mathrm{{points}}}} = {len(velarr[w])}$',
                     showarrow=True,
                     arrowhead=2,
                     arrowsize=1,
@@ -352,9 +340,9 @@ def inspect_vel_ew(ewmap, vmap, snrmap, spatial_bins, fig_save_dir, static_sn_ra
 
 
 
-def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, power_law = True, pearson = True, contours = True, incidence = True,
+def velocity_vs_sfr(galname, bin_method, terminal_velocity = True, power_law = True, pearson = True, contours = True, incidence = True,
                     hists = False, verbose = False):
-    check_filepath(save_dir, mkdir=True, verbose=verbose)
+    
     verbose_print(verbose, f"Creating velocity plots")
 
     ## Aquire the data and set up paths
@@ -365,9 +353,14 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
     filedir = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plan)
     filepath = os.path.join(filedir, f"{galname}-{bin_method}-local_maps.fits")
 
+    figures_dir = os.path.join(filedir, 'figures')
+    save_dir = os.path.join(figures_dir, 'results')
+    check_filepath(save_dir, mkdir=True, verbose=verbose)
+
     hdul = fits.open(filepath)
 
     spatial_bins = hdul['SPATIAL_BINS'].data
+    radius_map = hdul['RADIUS'].data
 
     vmap = hdul['V_NaI'].data
     vmap_mask = hdul['V_NaI_MASK'].data
@@ -386,8 +379,8 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
     mask_significant = np.logical_and(~mask, vmap_frac >= 0.95)
     mask_insignificant = np.logical_and(~mask, vmap_frac < 0.95)
 
-    unique_bins, inds_sig = np.unique(spatial_bins[mask_significant], return_index=True)
-    unique_bins, inds_insig = np.unique(spatial_bins[mask_insignificant], return_index=True)
+    _, inds_sig = np.unique(spatial_bins[mask_significant], return_index=True)
+    _, inds_insig = np.unique(spatial_bins[mask_insignificant], return_index=True)
 
 
     sfrs = sfrmap[mask_significant][inds_sig]
@@ -396,20 +389,25 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
     velocities = vmap[mask_significant][inds_sig]
     velocity_errors = vmap_error[mask_significant][inds_sig]
 
+    radii = radius_map[mask_significant][inds_sig]
+
     ## colormap and errorbar style
-    normalized = mcolors.Normalize(vmin = np.min(velocities), vmax = np.max(velocities))
-    cmap = cm.bwr
-    colors = cmap(normalized(velocities))
+    #normalized = mcolors.Normalize(vmin = np.min(velocities), vmax = np.max(velocities))
+    #cmap = cm.bwr
+    #colors = cmap(normalized(velocities))
+    normalized = mcolors.Normalize(vmin = np.min(radii), vmax = np.max(radii))
+    cmap = cm.Oranges
+    colors = cmap(normalized(radii))
 
     style = dict(
         linestyle = 'none',
         marker = 'o',
         ms = 1.9,
-        lw = 1.5,
+        lw = 1,
         markeredgecolor = 'k',
-        markeredgewidth = 0.6,
+        markeredgewidth = 0.4,
         ecolor = 'k',
-        elinewidth = 0.6,
+        elinewidth = 0.4,
         capsize = 2
     )
 
@@ -419,6 +417,11 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
     for sf, vel, d_sfr, d_v, c in zip(sfrs, velocities, sfr_errors, velocity_errors, colors):
         errorbar = ax.errorbar(sf, vel, xerr=None, yerr=d_v, markerfacecolor=c, **style)
     
+    sm = cm.ScalarMappable(cmap=cmap, norm=normalized)
+    sm.set_array([])  # Dummy array for colorbar
+    cbar = plt.colorbar(sm, ax=ax, pad=0.01)
+    cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
+
     ax.set_xlim(-2.6,-.1)
     ax.set_xlabel(r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$')
     ax.set_ylabel(r'$v_{\mathrm{Na\ D}}\ \left( \mathrm{km\ s^{-1}} \right)$')
@@ -515,17 +518,35 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
         vterm_mask = hdul['V_MAX_OUT_MASK'].data
         vterm_error = np.median(hdul['V_MAX_OUT_ERROR'].data, axis=0)
 
-        mask = np.logical_or(vterm_mask.astype(bool), sfrmap_mask.astype(bool))
 
-        terminal_velocities = vterm[~mask]
-        terminal_velocity_errors = vterm_error[~mask]
+        combined_mask = np.logical_or(vterm_mask.astype(bool), sfrmap_mask.astype(bool))
+        mask = combined_mask | (vterm >= 400) | (sfrmap == -999)
 
-        sfrs = sfrmap[~mask]
-        sfr_errors = sfrmap_error[~mask]
+        masked_vterm = vterm[~mask]
+        masked_vterm_error = vterm_error[~mask]
 
-        normalized = mcolors.Normalize(vmin = np.min(terminal_velocities), vmax = np.max(terminal_velocities))
-        cmap = cm.Blues
-        colors = cmap(normalized(terminal_velocities))
+        masked_sfrmap = sfrmap[~mask]
+        masked_sfrmap_error = sfrmap_error[~mask]
+
+        masked_radius = radius_map[~mask]
+
+        masked_bins = spatial_bins[~mask]
+        _ , bin_inds = np.unique(masked_bins, return_index=True)
+
+        terminal_velocities = masked_vterm[bin_inds]
+        terminal_velocity_errors = masked_vterm_error[bin_inds]
+
+        sfrs = masked_sfrmap[bin_inds]
+        sfr_errors = masked_sfrmap_error[bin_inds]
+
+        radii = masked_radius[bin_inds]
+
+        # normalized = mcolors.Normalize(vmin = np.min(terminal_velocities), vmax = np.max(terminal_velocities))
+        # cmap = cm.Blues
+        # colors = cmap(normalized(terminal_velocities))
+        normalized = mcolors.Normalize(vmin = np.min(radii), vmax = np.max(radii))
+        cmap = cm.Oranges
+        colors = cmap(normalized(radii))
 
         style = dict(
             linestyle = 'none',
@@ -539,11 +560,18 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
             capsize = 2
         )  
 
-        plt.figure(figsize=(7,7))
-        for tv, tv_err, sfr, sfr_err, c in zip(terminal_velocities, terminal_velocity_errors, sfrs, sfr_errors, colors):
-            #plt.errorbar(sfr, tv, xerr=None, yerr=tv_err, color = c, **style)
-            plt.scatter(sfr, tv, marker='o', s = 4, color=c, ec='k', lw=1)
+        fig, ax = plt.subplots(figsize=(7,7))
 
+        items = zip(terminal_velocities, terminal_velocity_errors, sfrs, sfr_errors, colors)
+        #iterator = tqdm(items, desc="Drawing Terminal Velocity vs SFR figure") if verbose else items
+        for tv, tv_err, sfr, sfr_err, c in items:
+            #plt.errorbar(sfr, tv, xerr=None, yerr=tv_err, color = c, **style)
+            sc = ax.scatter(sfr, tv, marker='o', s = 12, color=c, ec='k', lw=.75)
+
+        sm = cm.ScalarMappable(cmap=cmap, norm=normalized)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax, pad=0.01)
+        cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
         ## setup power law and pearsonr
         if power_law:
             def wind_model(sfr, scale, power):
@@ -554,14 +582,16 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
             modsfr = np.logspace(-3, 0, 1000)
             modv = wind_model(modsfr, popt[0], popt[1])
 
-            plt.plot(np.log10(modsfr), modv, 'dimgray', linestyle='dashed', 
-                    label=rf'$v = {popt[0]:.0f}\ \left( \Sigma_{{\mathrm{{SFR}}}} \right)^{{{popt[1]:.2f}}}$')
+            #model_label = rf'$v = {popt[0]:.0f}\ \left( \Sigma_{{\mathrm{{SFR}}}} \right)^{{{popt[1]:.2f}}}$'
+            model_label = rf'$v \propto \Sigma_{{\mathrm{{SFR}}}} ^{{{popt[1]:.2f}}}$'
+            ax.plot(np.log10(modsfr), modv, 'dimgray', linestyle='dashed', 
+                    label=model_label)
 
-            plt.legend(frameon=False)
+            ax.legend(frameon=False, fontsize=17)
 
-        plt.xlim(-2.4,0)
-        plt.xlabel(r'$\mathrm{Log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$')
-        plt.ylabel(r'$ v_{\mathrm{out,\ max}}\ \left( \mathrm{km\ s^{-1}} \right)$')
+        ax.set_xlim(-3,0)
+        ax.set_xlabel(r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$')
+        ax.set_ylabel(r'$ v_{\mathrm{out,\ max}}\ \left( \mathrm{km\ s^{-1}} \right)$')
 
         outfil = os.path.join(save_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
         plt.savefig(outfil, bbox_inches='tight')
@@ -623,3 +653,171 @@ def velocity_vs_sfr(galname, bin_method, save_dir, terminal_velocity = True, pow
         outfile = os.path.join(save_dir, f'{galname}-{bin_method}-incidence.pdf')
         plt.savefig(outfile, bbox_inches='tight')
         verbose_print(verbose, f"Incidence vs SFR fig saved to {outfil}")
+
+
+def dap_maps(galname: str, bin_method: str, mapsfile: str, output_dir: str, verbose = False):
+
+    def rescale_8bit(image, cmin = 0, cmax = None, scale = 'linear'):
+        cmax = image.max() if cmax is None else cmax
+
+        rescale = (image - cmin) / (cmax - cmin)
+        if scale == 'linear':
+            scaledim = 255 * rescale
+        elif scale == 'sqrt':
+            scaledim = 255 * np.sqrt( rescale )
+            
+        scaledim[scaledim < 0] =0
+        scaledim[scaledim >255] = 255
+        return scaledim.astype(np.uint8)
+    
+
+    def rgb_im(cubefile, threshold = 100):
+        from mpdaf.obj import Cube
+        cube = Cube(cubefile)
+        imB = cube.get_band_image('Johnson_B').data
+        imV = cube.get_band_image('Johnson_V').data
+        imR = cube.get_band_image('Cousins_R').data
+
+        B = rescale_8bit(imB, cmax=900, scale='sqrt')
+        V = rescale_8bit(imV, cmax=1000, scale='sqrt')
+        R = rescale_8bit(imR, cmax=750, scale='sqrt')
+
+        ny,nx = imB.shape
+        rgb = np.zeros([ny,nx,3], dtype=np.uint8)
+        rgb[:,:,0] = R
+        rgb[:,:,1] = V
+        rgb[:,:,2] = B
+
+        # Case 1: Only one channel is 255, and the other two are low
+        r_peak = (rgb[..., 0] == 255) & (rgb[..., 1] < threshold) & (rgb[..., 2] < threshold)
+        g_peak = (rgb[..., 1] == 255) & (rgb[..., 0] < threshold) & (rgb[..., 2] < threshold)
+        b_peak = (rgb[..., 2] == 255) & (rgb[..., 0] < threshold) & (rgb[..., 1] < threshold)
+
+        # Case 2: Two channels are 255, and one is low
+        rg_peak = (rgb[..., 0] == 255) & (rgb[..., 1] == 255) & (rgb[..., 2] < threshold) 
+        rb_peak = (rgb[..., 0] == 255) & (rgb[..., 2] == 255) & (rgb[..., 1] < threshold) 
+        gb_peak = (rgb[..., 1] == 255) & (rgb[..., 2] == 255) & (rgb[..., 0] < threshold)  
+
+        mask = r_peak | g_peak | b_peak | rg_peak | rb_peak | gb_peak
+
+        rgb[mask] = 0
+        return rgb
+
+
+    maps = fits.open(mapsfile)
+
+    pipepline_datapath = defaults.get_data_path('pipeline')
+    muse_cubes_path = os.path.join(pipepline_datapath, 'muse_cubes')
+    raw_cube_path = os.path.join(muse_cubes_path, galname, f"{galname}.fits")
+
+    rgb = rgb_im(raw_cube_path)
+    snr = maps['bin_snr'].data
+    radius = maps['bin_lwellcoo'].data[1]
+
+    chisq = maps['stellar_fom'].data[2]
+    stellar_vel = maps['stellar_vel'].data
+    stellar_sigma = maps['stellar_sigma'].data
+
+    d4000 = maps['specindex'].data[43]
+
+    emlines = maps['EMLINE_GFLUX'].data
+    ha = emlines[23]
+    hb = emlines[14]
+    oiii = emlines[16] #oiii 5007 
+    #sii = emlines[25] + emlines[26] # sii 6718,32
+    #oi = emlines[20] # oi 6302
+    #nii = emlines[24] # nii 6585
+
+    plotdicts = {
+        'RGB':dict(image = rgb, cmap = None, vmin = None, vmax = None, v_str = 'B, V, R'),
+        'RADIUS':dict(image = radius, cmap = 'autumn_r', vmin=0, vmax=1, v_str = r'$R / R_e$'),
+        'SNR':dict(image = snr, cmap = 'coolwarm', vmin=0, vmax=75, v_str = r'$S/N_g$'),
+
+        'STELLAR_VEL':dict(image = stellar_vel, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$V_{\star}\ \left( \mathrm{km\ s^{-1}} \right)$'),
+        'STELLAR_SIG':dict(image = stellar_sigma, cmap = 'inferno', vmin = 0, vmax = 150, v_str = r'$\sigma_{\star}\ \left( \mathrm{km\ s^{-1}} \right)$'),
+        'CHISQ':dict(image = chisq, cmap = 'cividis', vmin = 0, vmax = 2, v_str = r'$\chi^2_{\nu}$'),
+        #'D4000':dict(image = d4000, cmap = 'berlin', vmin = 1.0, vmax = 2.1, v_str = r'$\mathrm{D4000}$'),
+
+        'H_alpha':dict(image = ha, cmap = 'viridis', vmin = 0, vmax = 10, v_str = r'$\mathrm{H\alpha}\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$'),
+        'H_beta':dict(image = hb, cmap = 'viridis', vmin = 0, vmax = 2, v_str = r'$\mathrm{H\beta}\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$'),
+        'OIII':dict(image = oiii, cmap = 'viridis', vmin = 0, vmax = 1, v_str = r'$[\mathrm{O\,III}]\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$')
+        #'OI':dict(image = oi, cmap = 'viridis', vmin = 0, vmax = 2, v_str = r'$\mathrm{OI}\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$'),
+        #'SII':dict(image = sii, cmap = 'viridis', vmin = 0, vmax = 2, v_str = r'$\mathrm{SII}\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$'),
+        #'NII':dict(image = nii, cmap = 'viridis', vmin = 0, vmax = 2, v_str = r'$\mathrm{NII}\ \left( \mathrm{10^{-17}\ erg\ s^{-1}\ cm^{-2}\ spaxel^{-1}} \right)$')
+    }
+    
+    alphabet = list(string.ascii_lowercase)
+
+    #fig, ax = plt.subplots(3,3,sharex=True, sharey=True, figsize=(12,12))
+
+    nrow = 3
+    ncol = 3
+
+        # Setup figure and GridSpec
+    fig = plt.figure(figsize=(ncol*4, nrow*4))
+    gs = GridSpec(nrow, ncol, figure=fig, hspace=.375, wspace=-.35)
+
+    # Create the 3x3 axes
+    axes = []
+    for i in range(nrow):
+        for j in range(ncol):
+            ax = fig.add_subplot(gs[i, j])
+            ax.set_aspect('equal')  # Keep square axes
+            axes.append(ax)
+
+    # Iterate over the axes and plot content
+    for a, key, plot_dict, char in zip(axes, plotdicts.keys(), plotdicts.values(), alphabet):
+        plotmap = plot_dict['image']
+        if key != "RGB":
+            plotmap[plotmap == 0] = np.nan
+        im = a.imshow(plotmap, origin='lower',
+                    vmin=plot_dict['vmin'], vmax=plot_dict['vmax'],
+                    cmap=plot_dict['cmap'], extent=[32.4, -32.6, -32.4, 32.6])
+
+        a.set_facecolor('lightgray')
+
+        # Colorbar
+        divider = make_axes_locatable(a)
+        cax = divider.append_axes("top", size="5%", pad=0.01)
+        value_string = plot_dict['v_str']
+        if key == 'RGB':
+            dummy_data = np.zeros(plotmap.shape[:2])
+            dummy_cmap = mcolors.ListedColormap(['none'])
+            dummy_norm = mcolors.Normalize(vmin=0, vmax=1)
+            cbar = fig.colorbar(plt.imshow(dummy_data, cmap=dummy_cmap, norm=dummy_norm),
+                                cax=cax, orientation='horizontal')
+            cbar.ax.set_facecolor('white')
+            cbar.set_ticks([])
+            cbar.set_label(value_string, fontsize=14, labelpad=-25)
+            cbar.outline.set_visible(False)
+            cbar.ax.patch.set_alpha(0)
+        else:
+            def smart_int_formatter(x, pos):
+                if abs(x - round(x)) < 1e-2:  # very close to integer
+                    return f'{int(round(x))}'
+                else:
+                    return ''  # empty string means no label
+                
+            cbar = plt.colorbar(im, cax=cax, orientation='horizontal')
+            cbar.set_label(value_string, fontsize=12, labelpad=-45)
+            cax.xaxis.set_ticks_position('top')
+            cbar.ax.xaxis.set_major_formatter(FuncFormatter(smart_int_formatter))
+
+
+        a.text(0.075, 0.9, f'({char})', fontsize=10, transform=a.transAxes, color='white')
+
+    for i, ax in enumerate(axes):
+        row, col = divmod(i, nrow)
+        if row < nrow-1:  # Hide x ticks except for bottom row
+            ax.set_xticklabels([])
+        if col > 0:  # Hide y ticks except for left column
+            ax.set_yticklabels([])
+
+    # Axis labels for the whole figure
+    fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
+    fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
+
+    # Save output
+    outfile = os.path.join(output_dir, f"{galname}-{bin_method}_dapmaps.pdf")
+    os.makedirs(output_dir, exist_ok=True)
+    plt.savefig(outfile, bbox_inches='tight')

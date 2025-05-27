@@ -100,7 +100,7 @@ def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ew
 
         for i, sn_lim in enumerate(snr_lims):
             if snr <= sn_lim:
-                return np.inf if ew_lims[i] == 'inf' else ew_lims[i]
+                return np.inf if ew_lims[i] == 'None' else ew_lims[i]
             
         return ew_lims[-1]
 
@@ -124,7 +124,7 @@ def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ew
         ew_cut = get_ew_cut(sn, threshold_dict)
 
         if ewmap[y, x] < ew_cut:
-            velocity_map_mask[w] = 7
+            velocity_map_mask[w] = 8
 
 
 def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
@@ -174,8 +174,8 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
             continue
         
         bin_bD = doppler_param[y, x]
-        bD_upper = bin_bD + doppler_param_84[y, x]
-        bD_lower = bin_bD - doppler_param_16[y, x]
+        bD_upper = doppler_param_84[y, x]
+        bD_lower = doppler_param_16[y, x]
 
         term_vmap[w] = abs(bin_vel) + (np.sqrt(abs(np.log(0.1))) * bin_bD)
 

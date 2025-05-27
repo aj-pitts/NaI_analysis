@@ -548,7 +548,8 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
     """
 
     def reorder_hdu(hdul):
-        HDUL_order = ['SPATIAL_BINS', 
+        HDUL_order = ['SPATIAL_BINS',
+                      'RADIUS', 
                       'REDSHIFT', 'REDSHIFT_MASK', 'REDSHIFT_ERROR', 
                       'NaI_SNR',
                       'EW_NAI', 'EW_NAI_MASK', 'EW_NAI_ERROR',
@@ -665,7 +666,7 @@ def parse_config(config_fil, verbose):
     '0.023'
     """
 
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(allow_no_value=True)
     parsing = True
     while parsing:
         try:
@@ -717,7 +718,7 @@ def clean_ini_file(input_file, overwrite=False):
                 file.write(line + '\n')
             else:
                 if section:
-                    file.write(f"{line} = value\n")
+                    file.write(line + '\n')
 
     print("Done.")
 
@@ -735,134 +736,24 @@ def threshold_parser(galname, bin_method):
     return threshold_dict
 
 
-def spatial_bin_header(galname, bin_method):
-    hduname = 'SPATIAL_BINS'
-
+def use_sdss_header(galname, bin_method, hduname, sdss_header, desc = None, 
+                    ignore_keywords = ['XTENSION', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'NAXIS3', 'PCOUNT', 'GCOUNT', 'EXTNAME'], remove_keywords = []):
+    header = sdss_header
     header = {
         hduname:{
-            "DESC":(f"{galname}-{bin_method} binned spectra IDs",""),
+            "DESC":(f"{galname}-{bin_method} {desc}",""),
             "EXTNAME":(hduname, "Extension name"),
-            "AUTHOR":("K Westfall <westfall@ucolick.org> & SDSS-IV Data Group", "")
         }
     }
+
+    for key, value, comment in zip(sdss_header.keys(), sdss_header.values(), sdss_header.comments):
+        if key in ignore_keywords or key in remove_keywords:
+            continue
+
+        else:
+            header[hduname][key] = (value, comment)
+
+
+
+    
     return header
-
-### old location map_file_handler
-# if name in existing_names:
-#     # Overwrite data for existing HDU with this name
-#     hdu = hdul[name]
-#     hdu.data = data
-#     # Update the header with the provided header dictionary
-#     for key, value in header_dict.items():
-#         hdu.header[key] = value
-# else:
-#     # Append a new ImageHDU if it doesn't already exist
-#     new_hdu = fits.ImageHDU(data=data, name=name)
-#     for key, value in header_dict.items():
-#         new_hdu.header[key] = value
-#     hdul.append(new_hdu)
-
-
-# def header_dict_formatter_old(header_dict):
-
-#     def card_builder(key,value,comment):
-#         return f"{key.ljust(8)}={str(value).rjust(21)} / {comment}"
-
-#     reformat_dict = {}
-
-#     for key, header_instance in header_dict.items():
-#         if len(key)>8:
-#             key = key[:8]
-
-#         if not isinstance(header_instance, tuple):
-#             header_instance = (header_instance, '')
-
-#         value = header_instance[0]
-#         comment = header_instance[1]
-        
-#         card = card_builder(key,value,comment)
-
-#         if len(card)>80:
-#             split_card = card[:80].split('/ ',)
-#             split_comment = split_card[0]
-#             remainder = card[80:]
-#             reformat_dict[key] = (value, split_comment)
-#             reformat_dict['COMMENT'] = remainder
-
-#         else:
-#             reformat_dict[key] = (value, comment)
-
-#     return reformat_dict
-
-
-
-
-# def map_file_handler_old(galdir, maps_dict, filepath, overwrite = True, verbose = False):
-
-#     util.check_filepath(filepath, mkdir=True, verbose=verbose, error=True)
-
-#     file_name = f"{galdir}-local-maps.fits"
-#     full_path = os.path.join(filepath, file_name)
-
-#     # if overwrite and the FITS file exists
-#     if overwrite and os.path.isfile(full_path):
-#         # Open the existing file in update mode
-#         with fits.open(full_path, mode='update') as hdul:
-#             new_hdul = fits.HDUList()
-
-#             # Track existing HDU names
-#             existing_names = {hdu.name for hdu in hdul if isinstance(hdu, fits.ImageHDU)}
-#             i=0
-
-#             for name, (data, header_dict) in maps_dict.items():
-#                 header_dict = header_dict_formatter(header_dict)
-#                 if not isinstance(data, np.ndarray) or data.ndim != 2:
-#                     raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
-
-#                 # Create a new HDUList preserving order and replacing matching HDUs
-#                 new_hdul = fits.HDUList()
-
-#                 for hdu in hdul:
-#                     if isinstance(hdu, fits.ImageHDU) and hdu.name == name:
-#                         # Replace the HDU with the new one
-#                         updated_hdu = fits.ImageHDU(data=data, name=name)
-#                         for key, value in header_dict.items():
-#                             updated_hdu.header[key] = value
-#                         new_hdul.append(updated_hdu)
-#                     else:
-#                         # Keep the existing HDU unchanged
-#                         new_hdul.append(hdu)
-
-#                 # Clear the original HDUList and replace it with the new one
-#                 hdul.clear()
-#                 hdul.extend(new_hdul)
-
-#                 print(f"Writing data to HDUL...")
-#             hdul.flush()  # Save changes
-#             print("Done!       ")
-#             print(f"Data saved to {full_path}")
-#     else:
-#         # Create a new FITS file with the given HDUs
-#         hdul = fits.HDUList([fits.PrimaryHDU()])  # Start with a Primary HDU
-#         for name, (data, header_dict) in maps_dict.items():
-#             header_dict = header_dict_formatter(header_dict)
-#             if not isinstance(data, np.ndarray) or data.ndim != 2:
-#                 raise ValueError(f"Data for '{name}' must be a 2-dimensional numpy array.")
-            
-#             new_hdu = fits.ImageHDU(data=data, name=name)
-#             # Add header information if provided
-#             for key, value in header_dict.items():
-#                 new_hdu.header[key] = value
-#             hdul.append(new_hdu)
-
-#         current_files = [f for f in os.listdir(filepath) if not f.startswith('.')]
-#         if len(current_files)>0:
-#             fileslist = glob(os.path.join(filepath, "*.fits"))
-#             n = len(fileslist)
-#             padded_number = str(n).zfill(3)
-#             base_name, ext = os.path.splitext(file_name)
-#             file_name = f"{base_name}-{padded_number}{ext}"
-#             full_path = os.path.join(filepath, file_name)
-
-#         hdul.writeto(full_path, overwrite=True)
-#         print(f"Created new FITS file '{filepath}'.")
