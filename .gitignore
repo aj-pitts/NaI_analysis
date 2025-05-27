@@ -3,10 +3,8 @@ data/
 paper/dat/
 paper/paper-plots
 plot_inspect/
-.ipynb_checkpoints
 .vscode
 *~
 \#*#
-Testing.ipynb
-make_plots.ipynb
+*ipynb*
 __pycache__
