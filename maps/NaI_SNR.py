@@ -32,7 +32,7 @@ def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
         flux_arr = fluxcube[wave_inds, y_inds[0], x_inds[0]]
         ivar_arr = ivarcube[wave_inds, y_inds[0], x_inds[0]]
         sigma_arr = 1/np.sqrt(ivar_arr)
-
+        
 
         snr_map[w] = np.median(flux_arr / sigma_arr)
 

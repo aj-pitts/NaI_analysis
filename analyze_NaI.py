@@ -4,12 +4,15 @@ import os
 import warnings
 from astropy.io import fits
 
+import numpy as np
+
+import maps.Hii
 import maps.NaI_EW
 import maps.NaI_SNR
 import maps.NaI_Velocity
 import maps.SFR
 import maps.redshift
-from modules import util, defaults, file_handler, plotter, inspect
+from modules import util, defaults, file_handler, plot_results, inspect
 import maps
 import mcmc_results
 
@@ -21,9 +24,7 @@ def get_args():
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('-v', '--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
-    parser.add_argument('--plotter', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
     parser.add_argument('-m', '--mask', help = "Mask velocities by S/N & EW combination configuration (default: False)", action='store_true',default=False)
-    parser.add_argument('--noplot', help = "Flag to ignore plotting Maps (default: False)", action='store_true', default=False)
     
     return parser.parse_args()
 
@@ -66,7 +67,6 @@ def main(args):
     inspect_figures_dir = os.path.join(gal_figures_dir, 'inspection')
     results_figures_dir = os.path.join(gal_figures_dir, 'results')
 
-
     ####### REDSHIFT #######
     zmap_dict = maps.redshift.redshift_map_dict(z_config, mapsfile, verbose=verbose)
     redshift_mapdict = file_handler.standard_map_dict(galname, zmap_dict, HDU_keyword="REDSHIFT", IMAGE_units="")
@@ -94,6 +94,7 @@ def main(args):
 
     ####### NaD VELOCITY #######
     vmap_dict = maps.NaI_Velocity.make_vmap(cubefile, mapsfile, mcmc_table, verbose=verbose)
+
 
     if args.mask:
         print('Applying user set thresholds to velocity mask')
@@ -126,42 +127,26 @@ def main(args):
     additional_masks = [(9, 'Bin Sodium is redshifted'), (10,'Bin velocity confidence is < 95%')]
     terminal_velocity_mapdict = file_handler.standard_map_dict(galname, terminal_vmap_dict, HDU_keyword=vout_hdu_name, IMAGE_units=units, 
                                                                additional_mask_bits=additional_masks, asymmetric_error=True)
+    
+    ####### HII #######
+    maps.Hii.write_fluxes(galname, bin_method, exists_ok=True, verbose=verbose)
+    hii_dict, hii_header = maps.Hii.get_hii_mapdict(galname, bin_method, verbose=verbose)
+    hii_mapdict = file_handler.standard_map_dict(galname, hii_dict, custom_header_dict=hii_header)
 
     util.verbose_print(verbose, f"Analysis Complete!\nPreparing to write data to {output_dir}.")
 
-    mapdict_list = [spatial_bins_dict, radius_dict, redshift_mapdict, snr_mapdict, ew_mapdict, sfr_mapdict, mcmc_cubedict, velocity_mapdict, terminal_velocity_mapdict]
+    mapdict_list = [spatial_bins_dict, radius_dict, redshift_mapdict, snr_mapdict, ew_mapdict, sfr_mapdict, mcmc_cubedict, velocity_mapdict, terminal_velocity_mapdict, hii_mapdict]
     file_handler.map_file_handler(f"{galname}-{bin_method}", mapdict_list, 
                                   output_dir, verbose=verbose, preserve_standard_order= True, overwrite=True)
+    
+    ###### RESULT PLOTTTING #######
+    plot_results.main(args=args)
 
-
-    if not args.noplot:
-        util.check_filepath(results_figures_dir, mkdir=True, verbose=verbose)
-        plotter.standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=verbose)
-
-        if args.mask:
-            inspect.velocity_vs_sfr(galname, bin_method, terminal_velocity=True, power_law=True, 
-                                    pearson=True, contours=True, incidence=True, verbose=verbose)
-
-
-def plot_only(args):
-    galname = args.galname
-    bin_method = args.bin_method
-    verbose = args.verbose
-    corr_key = 'BETA-CORR'
-
-    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose, redshift=True)
-
-    mapsfile = datapath_dict['MAPS']
-    plotter.standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=verbose)
-    inspect.velocity_vs_sfr(galname, bin_method, terminal_velocity=True, power_law=True, 
-                                    pearson=True, contours=True, incidence=True, verbose=verbose)
+    ## TODO
+    ###### INSPECT PLOTTING #######
 
 
 if __name__ == "__main__":
     warnings.filterwarnings('ignore')
     args = get_args()
-
-    if args.plotter:
-        plot_only(args)
-    else:
-        main(args)
+    main(args)
