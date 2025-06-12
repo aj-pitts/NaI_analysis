@@ -13,7 +13,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-from modules import defaults
+from modules import defaults, file_handler
 from modules.util import verbose_print, verbose_warning, check_filepath
 
 import plotly.graph_objects as go
@@ -24,6 +24,9 @@ from tqdm import tqdm
 
 
 def inspect_bin(galname, bin_method, bin_list, cube_file, map_file, redshift, local_file = None, show_norm = False, verbose = False, QtAgg = True, save = True):
+    if len(bin_list) > 100:
+        raise ValueError(f"Input of {len(bin_list)} bins too large. Recommended 100 or less bins at a time.")
+    
     plt.style.use(os.path.join(defaults.get_default_path('config'), 'figures.mplstyle'))
     if QtAgg:
         matplotlib.use('QtAgg')
@@ -165,16 +168,22 @@ def inspect_bin(galname, bin_method, bin_list, cube_file, map_file, redshift, lo
             plt.show()
 
 
-def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, contour = True, thresholds = None, 
+def inspect_vel_ew(galname, bin_method, ewmap, ewmap_mask, snrmap, vmap, spatial_bins, contour = True, fig_save_dir = None,
                    verbose = False):
-        check_filepath(fig_save_dir, mkdir=True, verbose=verbose)
+        thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+        snranges = thresholds['sn_lims']
+        ewlims = thresholds['ew_lims']
+
+        if fig_save_dir is not None:
+            check_filepath(fig_save_dir, mkdir=False, verbose=verbose)
         plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
 
-        out_file = os.path.join(fig_save_dir, 'vel_thresholds.pdf')
-        out_file_plotly = os.path.join(fig_save_dir, 'vel_thresholds_binned.pdf')
+        outpath = defaults.get_fig_paths(galname, bin_method, 'inspection') if fig_save_dir is None else fig_save_dir
+        out_file = os.path.join(outpath, 'vel_thresholds.pdf')
+        out_file_plotly = os.path.join(outpath, 'vel_thresholds_binned.pdf')
 
-
-        mask = np.logical_or(np.logical_or(ewmap_mask.astype(bool),  (vmap == -999)), np.logical_or((ewmap == -999), (snrmap == -999)))
+        w = (vmap == -999) | (ewmap == -999)
+        mask = np.logical_or(ewmap_mask.astype(bool), w)
 
         masked_bins = spatial_bins[~mask]
         masked_snr = snrmap[~mask]
@@ -187,20 +196,16 @@ def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, 
         ewarr = masked_ew[bin_inds]
         velarr = masked_vel[bin_inds]
 
-        #snr_stats = (int(np.median(snarr) - 0.3 * np.std(snarr)), int(np.median(snarr)), int(np.median(snarr) + np.std(snarr)), np.ceil(np.max(snarr)))
-        #snranges = [(0, snr_stats[0]), (snr_stats[0], snr_stats[1]), (snr_stats[1], snr_stats[2]), (snr_stats[2], snr_stats[3])]
-        snranges = [(0, 30), (30, 60), (60, 90), (90, np.inf)]
-        #thresholds = [None, 0.8, 0.6, 0.4]
 
         verbose_print(verbose, f"Creating velocity versus EW plots")
 
         fig, ax = plt.subplots(2,2, sharey=True, sharex=False, figsize=(12,12))
         for i, a in enumerate(fig.get_axes()):
-            sn_range = snranges[i]
-            w = (snarr > sn_range[0]) & (snarr <= sn_range[1])
+            sn_low, sn_high = snranges[i]
+            w = (snarr > sn_low) & (snarr <= sn_high)
             
             a.scatter(ewarr[w], velarr[w], s=0.5)
-            a.set_title(rf"${sn_range[0]} < S/N \leq {sn_range[1]}$")
+            a.set_title(rf"${sn_low} < S/N \leq {sn_high}$")
 
             ewmin = np.floor(np.median(ewarr[w]) - 3 * np.std(ewarr[w]))
             ewmax = np.ceil(np.median(ewarr[w]) + 3 * np.std(ewarr[w]))
@@ -208,11 +213,12 @@ def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, 
             a.set_ylim(-750, 750)
 
             a.grid(visible=True, linewidth=0.5, zorder=0)
-            if thresholds is not None:
-                vline = thresholds[i] 
-                if vline != 'None':
-                    a.vlines(vline, -1000, 1000, linestyle='dashed', color='k', lw=1.5, label=rf'{vline} $\mathrm{{\AA}}$')
-                    a.legend(frameon=False, loc='upper right')
+            if ewlims is not None:
+                vline = ewlims[i]
+                if not np.isfinite(vline):
+                    pass
+                a.vlines(vline, -1000, 1000, linestyle='dashed', color='k', lw=1.5, label=rf'{vline} $\mathrm{{\AA}}$')
+                a.legend(frameon=False, loc='upper right')
             
         fig.text(0.5, 0, r'$\mathrm{EW_{Na\ D}}\ (\mathrm{\AA})$', ha='center',va='center',fontsize=20)
         fig.text(0, 0.5, r'$v_{\mathrm{Na\ D}}\ (\mathrm{km\ s^{-1}})$', rotation='vertical', ha='center', va='center', fontsize=20)
@@ -229,9 +235,9 @@ def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, 
 
 
             # Iterate through S/N ranges and create contours
-            for i, sn_range in enumerate(snranges):
+            for i, (sn_low, sn_high) in enumerate(snranges):
                 # Apply S/N range and data cleaning
-                w = (snarr > sn_range[0]) & (snarr <= sn_range[1])
+                w = (snarr > sn_low) & (snarr <= sn_high)
 
                 # Create 2D histogram for contour plot
                 npoints = velarr[w].size
@@ -256,8 +262,8 @@ def inspect_vel_ew(ewmap, ewmap_mask, snrmap, vmap, spatial_bins, fig_save_dir, 
 
                 # Add vertical line if threshold exists
                 #vline = thresholds[i]
-                vline = None
-                if vline is not None:
+                vline = ewlims[i]
+                if np.isfinite(vline):
                     fig.add_trace(
                         go.Scatter(
                             x=[vline, vline],
