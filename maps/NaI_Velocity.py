@@ -10,11 +10,11 @@ from datetime import datetime
 import argparse
 from tqdm import tqdm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from modules import defaults, file_handler, util, plotter
+from modules import defaults, file_handler, util, plotter, inspect
 import mcmc_results
 
 
-def make_vmap(cube_fil, maps_fil, mcmc_table, verbose=False):
+def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_mask, snrmap, verbose=False):
     cube = fits.open(cube_fil)
     maps = fits.open(maps_fil)
     if cube['primary'].header['dapqual'] == 30:
@@ -36,7 +36,7 @@ def make_vmap(cube_fil, maps_fil, mcmc_table, verbose=False):
     frac_map = np.zeros_like(vel_map)
     
     ### TODO ###
-    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
+    #stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
     ############
 
     ## mask unused spaxels
@@ -71,11 +71,19 @@ def make_vmap(cube_fil, maps_fil, mcmc_table, verbose=False):
         vel_map_error[0][w] = velocity_16
         vel_map_error[1][w] = velocity_84
 
+        if not np.isfinite(velocity):
+            vmap_mask[w] = 4
+            velocity = -999
 
-        if min(abs(velocity_84), abs(velocity_16)) >= 20: # ~ lambda unc of 0.4 Å
+        if not np.isfinite(velocity_16) or not np.isfinite(velocity_84):
+            vmap_mask[w] = 5
+            velocity_16 = -999
+            velocity_84 = -999
+
+        if np.mean([abs(velocity_16), abs(velocity_84)]) >= 30:
             vmap_mask[w] = 8
-        
-        if velocity == 0:
+
+        if velocity == 0 or velocity == -999:
             frac = 0
         else:
             frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity > 0 else np.sum(lambda_samples < lamrest)/lambda_samples.size
@@ -83,29 +91,31 @@ def make_vmap(cube_fil, maps_fil, mcmc_table, verbose=False):
         frac_map[w] = frac
         vel_map[w] = velocity
 
+    apply_velocity_mask(galname, bin_method, binid, vel_map, vmap_mask, ewmap, ewmap_mask, snrmap, verbose=verbose)
+
     vmap_name = "Vel Map"
     vmap_dict = {f"{vmap_name}":vel_map, f"{vmap_name} Confidence":frac_map, f"{vmap_name} Mask":vmap_mask, f"{vmap_name} Uncertainty":vel_map_error}
 
     return vmap_dict
 
 
-def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ewmap, ewmap_mask, snrmap, verbose = False):
-
+def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map, velocity_map_mask, ewmap, ewmap_mask, snrmap, verbose = False):
+    inspect.inspect_vel_ew(galname, bin_method, ewmap, ewmap_mask, snrmap, velocity_map, spatial_bins, contour = True,
+                               verbose = True)
     threshold_dict = file_handler.threshold_parser(galname, bin_method)
 
+    if threshold_dict['ew_lims'] is None:
+        util.verbose_print(verbose, "No EW lims set. Skipping S/N and EW threshold mask.")
+        return
+    
     ## function to return the ew threshold
-    def get_ew_cut(snr, threshold_dict):
-        snr_lims = threshold_dict['snr']
-        ew_lims = threshold_dict['ew']
+    def get_ew_cut(snr: float, thresholds: dict):
+        for (sn_min, sn_max), ew_lim in zip(thresholds['sn_lims'], thresholds['ew_lims']):
+            if sn_min < snr <= sn_max:
+                return ew_lim
+        return np.inf
 
-        for i, sn_lim in enumerate(snr_lims):
-            if snr <= sn_lim:
-                return np.inf if ew_lims[i] == 'None' else ew_lims[i]
-            
-        return ew_lims[-1]
-
-
-    ## iterate the bins
+    ## iterate the bins and update the mask
     items = np.unique(spatial_bins)[1:]
     iterator = tqdm(items, desc="Masking velocities by EW and S/N threshold") if verbose else items
 
@@ -113,18 +123,13 @@ def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ew
         w = ID == spatial_bins
         ny, nx = np.where(w)
         y, x = ny[0], nx[0]
-
-        # if the ew was masked, mask the velocity
-        if np.median(ewmap_mask[w]).astype(bool):
-            velocity_map_mask[w] = 7
-            continue
         
         # apply the limit
         sn = snrmap[y, x]
         ew_cut = get_ew_cut(sn, threshold_dict)
 
         if ewmap[y, x] < ew_cut:
-            velocity_map_mask[w] = 8
+            velocity_map_mask[w] = 7
 
 
 def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
@@ -139,7 +144,7 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
     vmap = vmap_dict['Vel Map']
     vmap_mask = vmap_dict['Vel Map Mask']
     vmap_error = vmap_dict['Vel Map Uncertainty']
-    frac = vmap_dict['Vel Map Confidence']
+    #frac = vmap_dict['Vel Map Confidence']
 
     term_vmap = np.zeros_like(binid)
     term_vmap_mask = np.zeros_like(binid)
@@ -156,7 +161,7 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
         if bool(bin_v_mask):
             term_vmap_mask[w] = bin_v_mask
         
-        bin_frac = frac[y, x]
+        #bin_frac = frac[y, x]
         bin_vel = vmap[y, x]
         bin_vel_mask = vmap_mask[y, x]
         bin_vel_error_16 = vmap_error[0 ,y, x]
@@ -169,9 +174,9 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
             term_vmap_mask[w] = 9
             continue
         
-        if bin_frac < .95:
-            term_vmap_mask[w] = 10
-            continue
+        # if bin_frac < .95:
+        #     term_vmap_mask[w] = 10
+        #     continue
         
         bin_bD = doppler_param[y, x]
         bD_upper = doppler_param_84[y, x]
