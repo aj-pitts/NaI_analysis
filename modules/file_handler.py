@@ -556,7 +556,8 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
                       'SFRSD', 'SFRSD_MASK', 'SFRSD_ERROR',
                       'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
                       'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
-                      'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCM_84TH_PERC']
+                      'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCM_84TH_PERC',
+                      'HII']
         primary_hdu = hdul[0]
         sorted_hdus = [primary_hdu]
         sorted_hdus += sorted(hdul[1:], key=lambda hdu: HDUL_order.index(hdu.name) if hdu.name in HDUL_order else len(HDUL_order))
@@ -723,18 +724,77 @@ def clean_ini_file(input_file, overwrite=False):
     print("Done.")
 
 
-def threshold_parser(galname, bin_method):
+# def threshold_parser(galname, bin_method, require_ew=True):
+#     thresholds_path = os.path.join(defaults.get_default_path('config'), 'thresholds.yaml')
+#     with open(thresholds_path, "r") as f:
+#         thresholds_file = yaml.safe_load(f)
+
+#     # Try to load SNR bin edges (always required)
+#     try:
+#         snr_edges = thresholds_file['snr_bins'][bin_method]
+#     except KeyError:
+#         print(f"Binning method '{bin_method}' not found in SNR bins.")
+#         return None
+
+#     # Convert to floats, handling 'inf'
+#     snr_edges = [float("inf") if s == 'inf' else float(s) for s in snr_edges]
+#     snr_bins = list(zip(snr_edges[:-1], snr_edges[1:]))
+
+#     # If EW thresholds are optional and missing, just return the bins
+#     ew_list = thresholds_file.get('ew_thresholds', {}).get(galname, None)
+
+#     if ew_list is None:
+#         if require_ew:
+#             print(f"No EW thresholds found for galaxy '{galname}'.")
+#             return None
+#         else:
+#             return snr_bins  # Just return the bin definitions
+
+#     # Convert EW values
+#     ew_list = [float("inf") if ew == 'inf' else float(ew) for ew in ew_list]
+
+#     if len(snr_bins) != len(ew_list):
+#         raise ValueError("Mismatch: EW list should have one fewer element than SNR edges.")
+
+#     return {sn_bin: ew for sn_bin, ew in zip(snr_bins, ew_list)}
+
+def threshold_parser(galname, bin_method, require_ew=True):
     thresholds_path = os.path.join(defaults.get_default_path('config'), 'thresholds.yaml')
     with open(thresholds_path, "r") as f:
         thresholds_file = yaml.safe_load(f)
-    
-    key = f'{galname}-{bin_method}'
-    if not key in thresholds_file.keys():
+
+    # Always try to get SNR bins
+    try:
+        snr_edges = thresholds_file['snr_bins'][bin_method]
+    except KeyError:
+        print(f"Binning method '{bin_method}' not found in SNR bins.")
         return None
 
-    threshold_dict = thresholds_file[key]
-    return threshold_dict
+    # Convert edges to floats
+    snr_edges = [float('inf') if s == 'inf' else float(s) for s in snr_edges]
+    sn_lims = list(zip(snr_edges[:-1], snr_edges[1:]))
 
+    # Get EW limits for this galaxy (optional)
+    ew_raw = thresholds_file.get('ew_thresholds', {}).get(galname, None)
+    if ew_raw is None:
+        if require_ew:
+            print(f"No EW thresholds found for galaxy '{galname}'.")
+            return None
+        else:
+            return {
+                "sn_lims": sn_lims,
+                "ew_lims": None,
+            }
+
+    ew_lims = [float('inf') if ew == 'inf' else float(ew) for ew in ew_raw]
+
+    if len(sn_lims) != len(ew_lims):
+        raise ValueError(f"Mismatch: {len(sn_lims)} S/N bins but {len(ew_lims)} EW limits.")
+
+    return {
+        "sn_lims": sn_lims,
+        "ew_lims": ew_lims
+    }
 
 def use_sdss_header(galname, bin_method, hduname, sdss_header, desc = None, 
                     ignore_keywords = ['XTENSION', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'NAXIS3', 'PCOUNT', 'GCOUNT', 'EXTNAME'], remove_keywords = []):
