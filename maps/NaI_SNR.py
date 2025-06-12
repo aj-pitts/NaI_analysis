@@ -18,7 +18,7 @@ def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
     windows = [(5865, 5875), (5915, 5925)]
 
     items = np.unique(spatial_bins)
-    iterator = tqdm(np.unique(spatial_bins), desc="Constructing S/N Map") if verbose else items
+    iterator = tqdm(np.unique(spatial_bins)[1:], desc="Constructing S/N Map") if verbose else items
     for ID in iterator:
         w = ID == spatial_bins
         y_inds, x_inds = np.where(w)
@@ -33,8 +33,10 @@ def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
         ivar_arr = ivarcube[wave_inds, y_inds[0], x_inds[0]]
         sigma_arr = 1/np.sqrt(ivar_arr)
         
-
-        snr_map[w] = np.median(flux_arr / sigma_arr)
+        real = np.isfinite(flux_arr) & np.isfinite(sigma_arr) & (sigma_arr > 0)
+        snr_map[w] = np.median(flux_arr[real] / sigma_arr[real])
+    
+    snr_map[~np.isfinite(snr_map)] = 0
 
     hduname = "NaI_SNR"
 
