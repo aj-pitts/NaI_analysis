@@ -50,7 +50,7 @@ def check_filepath(filepath, mkdir=True, verbose=True, error=True):
                     verbose_warning(verbose, f"'{path}' does not exist")
 
 
-def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 5):
+def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 2):
     """
     Check whether a spatial bin should be included in analysis based on DAP bin maps, 
     masking criteria, and stellar velocity properties.
