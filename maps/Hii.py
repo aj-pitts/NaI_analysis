@@ -55,9 +55,6 @@ def write_fluxes(galname, bin_method, exists_ok = True, verbose=False):
 
 
 def get_hii_map(galname, bin_method, placeholder=False, verbose=False):
-    ## init necessary paths
-    analysis_plan = defaults.analysis_plans()
-    corr_key = "BETA-CORR"
 
     local_data_dir = defaults.get_data_path('local')
     hii_dir = os.path.join(local_data_dir, 'hii')
@@ -83,11 +80,9 @@ def get_hii_map(galname, bin_method, placeholder=False, verbose=False):
             
 
 
-
-
-def get_hii_mapdict(galname, bin_method, verbose=False):
+def get_hii_mapdict(galname, bin_method, placeholder=True, verbose=False):
     hdu_name = "HII"
-    hiimap = get_hii_map(galname, bin_method, verbose=verbose)
+    hiimap = get_hii_map(galname, bin_method, placeholder=placeholder, verbose=verbose)
     hii_header_dict = {
         hdu_name:{
             "DESC":"Unique IDs of spatially identified Hii regions",
