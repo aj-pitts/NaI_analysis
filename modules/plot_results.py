@@ -8,36 +8,25 @@ from scipy.optimize import curve_fit
 from scipy.stats import pearsonr
 
 import matplotlib.pyplot as plt
-import matplotlib
+#import matplotlib
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-from matplotlib import gridspec
+#from matplotlib import gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.gridspec import GridSpec
-from matplotlib.ticker import FuncFormatter, MaxNLocator
+from matplotlib.ticker import FuncFormatter
 
 from modules import util, defaults, file_handler, plotter, inspect
-from modules.util import verbose_print, verbose_warning, check_filepath
+from modules.util import verbose_print
 
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+#from plotly.subplots import make_subplots
 import plotly.io as pio
 
 import string
 
-from tqdm import tqdm
-
-def get_args():
-    parser = argparse.ArgumentParser(description="A script to create/overwrite plots without rerunning analyze_NaI")
-
-    parser.add_argument('galname', type=str, help="Input galaxy name.")
-    parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
-    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
-
-    return parser.parse_args()
-
-def plot_dap_maps(galname: str, bin_method: str, output_dir: str, verbose = False):
-    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose)
+def plot_dap_maps(galname: str, bin_method: str, output_dir = None, verbose = False):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
     mapsfile = datapath_dict['MAPS']
 
     def rescale_8bit(image, cmin = 0, cmax = None, scale = 'linear'):
@@ -200,73 +189,90 @@ def plot_dap_maps(galname: str, bin_method: str, output_dir: str, verbose = Fals
     fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
     fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
 
+    if output_dir is None:
+        output_dir = defaults.get_fig_paths(galname, bin_method, subdir='dap')
+
     # Save output
     outfile = os.path.join(output_dir, f"{galname}-{bin_method}_dapmaps.pdf")
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(outfile, bbox_inches='tight')
 
 
-def plot_local_maps(galname, bin_method, local_maps_path, results_dir, verbose=False):
+def plot_local_maps(galname, bin_method, local_maps_path, output_dir = None, verbose=False):
     hdul = fits.open(local_maps_path)
+    if output_dir is None:
+        output_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
 
     util.verbose_print(verbose, "Creating individual map plots...")
 
-    plotter.map_plotter(galname, bin_method, hdul['ew_nai'].data, 'EW_NAI', results_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
+    plotter.map_plotter(galname, bin_method, hdul['nai_snr'].data, 'NAI_SNR', output_dir, r'$S/N_{\mathrm{Na\ D}}$', '', 'managua',
+                0, 100, histogram=True, verbose=verbose)
+
+    plotter.map_plotter(galname, bin_method, hdul['ew_nai'].data, 'EW_NAI', output_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
                 -0.2, 1.5, mask = hdul['ew_nai_mask'].data, histogram=True, verbose=verbose)
     
-    plotter.map_plotter(galname, bin_method, hdul['sfrsd'].data, 'SFRSD', results_dir, r"$\mathrm{log \Sigma_{SFR}}$", r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$",
+    plotter.map_plotter(galname, bin_method, hdul['sfrsd'].data, 'SFRSD', output_dir, r"$\mathrm{log \Sigma_{SFR}}$", r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$",
                 'rainbow', -2.5, 0, mask = hdul['sfrsd_mask'].data, histogram=True, verbose=verbose)
     
-    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI_masked', results_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
+    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI_masked', output_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
                 -250, 250, mask=hdul['v_nai_mask'].data, minmax=True, mask_ignore_list=[8], histogram=True, verbose=verbose)
     
-    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI', results_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
+    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI', output_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
                 -200, 200, minmax=True, histogram=True, verbose=verbose)
     
 
 
-def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, results_dir: str, verbose = False):
+def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = True, output_dir = None, verbose = False):
     util.verbose_print(verbose, "Creating grid plot...")
     hdul = fits.open(local_maps_path)
     
-    z = hdul['redshift'].data
+    
     snr = hdul['nai_snr'].data
     ew = hdul['ew_nai'].data
-
     sfrsd = hdul['sfrsd'].data
     v_bulk = hdul['v_nai'].data
-    v_frac = hdul['V_NaI_FRAC'].data
 
-    mcmc = hdul['mcmc_results'].data
+    if mask:
+        #snr_mask = hdul['nai_snr_mask'].data.astype(bool)
+        snr_mask = snr <= 0
+        ew_mask = hdul['ew_nai_mask'].data.astype(bool)
+        sfrsd_mask = hdul['sfrsd_mask'].data.astype(bool)
+        v_mask = hdul['v_nai_mask'].data.astype(bool)
+    else:
+        snr_mask = np.zeros_like(snr).astype(bool)
+        ew_mask = np.zeros_like(ew).astype(bool)
+        sfrsd_mask = np.zeros_like(sfrsd).astype(bool)
+        v_mask = np.zeros_like(v_mask).astype(bool)
 
-    logn = mcmc[1]
-    cf = mcmc[2]
-    bd = mcmc[3]
-
+    #z = hdul['redshift'].data
+    #v_frac = hdul['V_NaI_FRAC'].data
+    # mcmc = hdul['mcmc_results'].data
+    # logn = mcmc[1]
+    # bd = mcmc[2]
+    # cf = mcmc[3]
 
     plotdicts = {
-        'Z':dict(image = z, cmap = 'coolwarm', vmin = None, vmax = None, v_str = r'$z$'),
-        'SNR':dict(image = snr, cmap = 'managua', vmin = 0, vmax = 100, v_str = r'$S/N_{\mathrm{Na\ D}}$'),
-        'EW':dict(image = ew, cmap = 'rainbow', vmin=-0.2, vmax=2, v_str = r'$\mathrm{EW_{Na\ D}}\ \left( \mathrm{\AA} \right)$$'),
+        #'Z':dict(image = z, cmap = 'coolwarm', vmin = None, vmax = None, v_str = r'$z$'),
+        'SNR':dict(image = snr, mask = snr_mask, cmap = 'managua', vmin = 0, vmax = 100, v_str = r'$S/N_{\mathrm{Na\ D}}$'),
+        'EW':dict(image = ew, mask = ew_mask, cmap = 'rainbow', vmin=-0.2, vmax=2, v_str = r'$\mathrm{EW_{Na\ D}}\ \left( \mathrm{\AA} \right)$'),
 
-        'SFRSD':dict(image = sfrsd, cmap = 'rainbow', vmin=-2.5, vmax=0, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$'),
-        'V_BULK':dict(image = v_bulk, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
-        'V_FRAC':dict(image = v_frac, cmap = 'Spectral', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
+        'SFRSD':dict(image = sfrsd, mask = sfrsd_mask, cmap = 'rainbow', vmin=-2.5, vmax=0, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$'),
+        'V_BULK':dict(image = v_bulk, mask = v_mask, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
+        #'V_FRAC':dict(image = v_frac, cmap = 'Spectral', vmin = -1, vmax = 1, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
 
-        'logN':dict(image = logn, cmap = 'pink', vmin = 0, vmax = 150, v_str = r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$'),
-        'Cf':dict(image = cf, cmap = 'pink', vmin = 0, vmax = 1, v_str = r'$C_f$'),
-        'bD':dict(image = bd, cmap = 'pink', vmin = 0, vmax = 100, v_str = r'$b_D \left( \mathrm{km\ s^{-1}} \right)$')
+        #'logN':dict(image = logn, cmap = 'pink', vmin = 13, vmax = 16.5, v_str = r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$'),
+        #'Cf':dict(image = cf, cmap = 'pink', vmin = 0, vmax = 1, v_str = r'$C_f$'),
+        #'bD':dict(image = bd, cmap = 'pink', vmin = 2, vmax = 100, v_str = r'$b_D \left( \mathrm{km\ s^{-1}} \right)$')
     }
     
     alphabet = list(string.ascii_lowercase)
 
-
-    nrow = 3
-    ncol = 3
+    nrow = 2
+    ncol = 2
 
     # Setup figure and GridSpec
     fig = plt.figure(figsize=(ncol*4, nrow*4))
-    gs = GridSpec(nrow, ncol, figure=fig, hspace=.375, wspace=-.35)
+    gs = GridSpec(nrow, ncol, figure=fig, hspace=.375, wspace=0)
 
     # Create the 3x3 axes
     axes = []
@@ -279,8 +285,10 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, results
     # Iterate over the axes and plot content
     for a, key, plot_dict, char in zip(axes, plotdicts.keys(), plotdicts.values(), alphabet):
         plotmap = plot_dict['image']
-        if key != "RGB":
-            plotmap[plotmap == 0] = np.nan
+        plotmask = plot_dict['mask']
+
+        plotmap[plotmask] = np.nan
+        # TODO mask???
         im = a.imshow(plotmap, origin='lower',
                     vmin=plot_dict['vmin'], vmax=plot_dict['vmax'],
                     cmap=plot_dict['cmap'], extent=[32.4, -32.6, -32.4, 32.6])
@@ -318,13 +326,16 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, results
     fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
 
     # Save output
-    outfile = os.path.join(results_dir, f"{galname}-{bin_method}_results_mapgrid.pdf")
-    os.makedirs(results_dir, exist_ok=True)
+    if output_dir is None:
+        output_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
+    outfile = os.path.join(output_dir, f"{galname}-{bin_method}_results_mapgrid.pdf")
+    os.makedirs(output_dir, exist_ok=True)
+
     plt.savefig(outfile, bbox_inches='tight')
     util.verbose_print(verbose, f"Results map grid saved to: {outfile}")
 
 
-def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson = True, contours = True,
+def velocity_vs_sfr(galname, bin_method, local_maps_path, output_dir = None, pearson = True, contours = True,
                     radius_cbar = False, hists = False, verbose = False):
 
     hdul = fits.open(local_maps_path)
@@ -335,31 +346,26 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
     vmap = hdul['V_NaI'].data
     vmap_mask = hdul['V_NaI_MASK'].data
     vmap_error = np.mean(hdul['V_NaI_ERROR'].data, axis=0)
-    vmap_frac = hdul['V_NaI_FRAC'].data
-
 
     sfrmap = hdul['SFRSD'].data
     sfrmap_mask = hdul['SFRSD_MASk'].data
     sfrmap_error = hdul['SFRSD_ERROR'].data
 
     ### TODO HANDLE ASYMMETRIC ERRORS
-    ## mask out values with map masks and velocity fracs
-    mask = np.logical_or(vmap_mask.astype(bool), sfrmap_mask.astype(bool))
+    ## mask out values
+    mapmask = np.logical_or(vmap_mask.astype(bool), sfrmap_mask.astype(bool))
+    w = (vmap == -999) | (sfrmap == -999)
+    mask = np.logical_or(mapmask, w)
 
-    mask_significant = np.logical_and(~mask, vmap_frac >= 0.95)
-    mask_insignificant = np.logical_and(~mask, vmap_frac < 0.95)
+    _, bin_inds = np.unique(spatial_bins[~mask], return_index=True)
 
-    _, inds_sig = np.unique(spatial_bins[mask_significant], return_index=True)
-    _, inds_insig = np.unique(spatial_bins[mask_insignificant], return_index=True)
+    sfrs = sfrmap[~mask][bin_inds]
+    sfr_errors = sfrmap_error[~mask][bin_inds]
 
+    velocities = vmap[~mask][bin_inds]
+    velocity_errors = vmap_error[~mask][bin_inds]
 
-    sfrs = sfrmap[mask_significant][inds_sig]
-    sfr_errors = sfrmap_error[mask_significant][inds_sig]
-
-    velocities = vmap[mask_significant][inds_sig]
-    velocity_errors = vmap_error[mask_significant][inds_sig]
-
-    radii = radius_map[mask_significant][inds_sig]
+    radii = radius_map[~mask][bin_inds]
 
     ## colormap and errorbar style
     if radius_cbar:
@@ -371,7 +377,14 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
         cmap = cm.bwr
         colors = cmap(normalized(velocities))
 
-    style = dict(
+    scatterstyle = dict(
+        marker = 'o',
+        s = 1.9**2,
+        linewidths = 0.4,
+        edgecolors = 'k',
+    )
+
+    errorstyle = dict(
         linestyle = 'none',
         marker = 'o',
         ms = 1.9,
@@ -383,16 +396,21 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
         capsize = 1.5
     )
 
-    ## scatter for insignificant values, errorbar for significant values
+    ## scatter for masked "bad" values, errorbar for good values
     fig, ax = plt.subplots(figsize=(7, 7))
-    scatter = ax.scatter(sfrmap[mask_insignificant][inds_insig], vmap[mask_insignificant][inds_insig], s=1, color='k', alpha=0.5)
-    for sf, vel, d_sfr, d_v, c in zip(sfrs, velocities, sfr_errors, velocity_errors, colors):
-        errorbar = ax.errorbar(sf, vel, xerr=None, yerr=d_v, markerfacecolor=c, **style)
+    for sf, vel, c in zip(sfrs, velocities, colors):
+        scatter = ax.scatter(sf, vel, facecolors=c, **scatterstyle)
     
+    x_pos = 0.1
+    y_pos = 0.1
+    x_pos_data, y_pos_data = ax.transData.inverted().transform(ax.transAxes.transform((x_pos, y_pos)))
+    ax.errorbar(x_pos_data, y_pos_data, yerr=np.mean(velocity_errors), fmt='none', color='black', capsize=3, elinewidth=1.5)
+
+
     sm = cm.ScalarMappable(cmap=cmap, norm=normalized)
     sm.set_array([])  # Dummy array for colorbar
-    cbar = plt.colorbar(sm, ax=ax, pad=0.01)
-    cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
+    #cbar = plt.colorbar(sm, ax=ax, pad=0.01)
+    #cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
 
     ax.set_xlim(-2.6,-.1)
     ax.set_xlabel(r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$')
@@ -402,8 +420,8 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
     ## pearson rank test
     if pearson:
         pearson_result = pearsonr(sfrs, velocities)
-        ax.text(0.85, 0.85, fr'$\rho = {pearson_result[0]:.1f}$', fontsize=11, transform = ax.transAxes)
-
+        val = round(pearson_result[0], 1)
+        ax.text(0.75, 0.85, fr'$\rho = {0.0 if val == -0.0 else val:.1f}$', fontsize=11, transform = ax.transAxes)
 
     if hists:
         # Create new axes for the histograms
@@ -426,7 +444,10 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
         #ax_hist_right.set_xlabel("Count")
         plt.tight_layout()
 
-    outfil = os.path.join(results_dir, f'{galname}-{bin_method}-v_vs_sfr.pdf')
+    if output_dir is None:
+        output_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
+
+    outfil = os.path.join(output_dir, f'{galname}-{bin_method}-v_vs_sfr.pdf')
     plt.savefig(outfil, bbox_inches='tight')
     verbose_print(verbose, f"Velocity vs SFR fig saved to {outfil}")
 
@@ -479,12 +500,12 @@ def velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson =
             mirror='all',
         )
             
-        outfil = os.path.join(results_dir, f'{galname}-{bin_method}-v_vs_sfr-contours.pdf')
+        outfil = os.path.join(output_dir, f'{galname}-{bin_method}-v_vs_sfr-contours.pdf')
         pio.write_image(fig, outfil) 
         verbose_print(verbose, f"Velocity vs SFR with contours saved to {outfil}")
 
 
-def terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_cbar = False, power_law = True, verbose = True):
+def terminal_velocity(galname, bin_method, local_maps_path, output_dir = None, radius_cbar = False, power_law = True, verbose = True):
     # open local maps fits file
     hdul = fits.open(local_maps_path)
 
@@ -502,7 +523,7 @@ def terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_
 
 
     combined_mask = np.logical_or(vterm_mask.astype(bool), sfrmap_mask.astype(bool))
-    mask = combined_mask | (vterm >= 400) | (sfrmap == -999)
+    mask = combined_mask | (sfrmap == -999) | (vterm >= 400)
 
     masked_vterm = vterm[~mask]
     masked_vterm_error = vterm_error[~mask]
@@ -529,7 +550,7 @@ def terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_
         colors = cmap(normalized(radii))
     else:
         normalized = mcolors.Normalize(vmin = np.min(terminal_velocities), vmax = np.max(terminal_velocities))
-        cmap = cm.bwr
+        cmap = cm.Blues
         colors = cmap(normalized(terminal_velocities))
     
     style = dict(
@@ -546,16 +567,21 @@ def terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_
 
     fig, ax = plt.subplots(figsize=(7,7))
 
-    items = zip(terminal_velocities, terminal_velocity_errors, sfrs, sfr_errors, colors)
+    items = zip(terminal_velocities, sfrs, colors)
     #iterator = tqdm(items, desc="Drawing Terminal Velocity vs SFR figure") if verbose else items
-    for tv, tv_err, sfr, sfr_err, c in items:
+    for tv, sfr, c in items:
         #plt.errorbar(sfr, tv, xerr=None, yerr=tv_err, color = c, **style)
         sc = ax.scatter(sfr, tv, marker='o', s = 12, color=c, ec='k', lw=.75)
 
+    x_pos = 0.1
+    y_pos = 0.1
+    x_pos_data, y_pos_data = ax.transData.inverted().transform(ax.transAxes.transform((x_pos, y_pos)))
+    ax.errorbar(x_pos_data, y_pos_data, yerr=np.mean(terminal_velocity_errors), fmt='none', color='black', capsize=3, elinewidth=1.5)
+
     sm = cm.ScalarMappable(cmap=cmap, norm=normalized)
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, pad=0.01)
-    cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
+    #cbar = plt.colorbar(sm, ax=ax, pad=0.01)
+    #cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
     ## setup power law and pearsonr
     if power_law:
         def wind_model(sfr, scale, power):
@@ -577,11 +603,21 @@ def terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_
     ax.set_xlabel(r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$')
     ax.set_ylabel(r'$ v_{\mathrm{out,\ max}}\ \left( \mathrm{km\ s^{-1}} \right)$')
 
-    outfil = os.path.join(results_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
+    if output_dir is None:
+        output_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
+
+    outfil = os.path.join(output_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
     plt.savefig(outfil, bbox_inches='tight')
     verbose_print(verbose, f"Terminal velocity vs SFR fig saved to {outfil}")    
 
+def get_args():
+    parser = argparse.ArgumentParser(description="A script to create/overwrite plots without rerunning analyze_NaI")
 
+    parser.add_argument('galname', type=str, help="Input galaxy name.")
+    parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
+    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
+
+    return parser.parse_args()
 
 
 def main(args):
@@ -595,20 +631,15 @@ def main(args):
     local_outputs = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plans)
     local_maps_path = os.path.join(local_outputs, f"{galname}-{bin_method}-local_maps.fits")
 
-    figures_dir = os.path.join(local_outputs, 'figures')
-    results_dir = os.path.join(figures_dir, 'results')
-    dap_figures_dir = os.path.join(figures_dir, 'dap')
+    verbose_print(verbose, f"Creating Plots for {galname}-{bin_method}")
+    
+    plot_dap_maps(galname, bin_method, verbose=verbose)
+    plot_local_maps(galname, bin_method, local_maps_path, verbose=verbose)
+    plot_local_grid(galname, bin_method, local_maps_path, mask=True, verbose=verbose)
+    velocity_vs_sfr(galname, bin_method, local_maps_path, pearson=True, contours=True, hists=True, verbose=verbose)
+    terminal_velocity(galname, bin_method, local_maps_path, power_law=True, verbose=verbose)
 
-    plot_dap_maps(galname, bin_method, dap_figures_dir, verbose=verbose)
-    plot_local_maps(galname, bin_method, local_maps_path, results_dir, verbose=verbose)
-    plot_local_grid(galname, bin_method, local_maps_path, results_dir, verbose=verbose)
-    velocity_vs_sfr(galname, bin_method, local_maps_path, results_dir, pearson=True, contours=True, radius_cbar=False,
-                    hists=True, verbose=verbose)
-    terminal_velocity(galname, bin_method, local_maps_path, results_dir, radius_cbar=False, power_law=True,
-                      verbose=verbose)
-
-
-
+    verbose_print(verbose, 'Done.')
 
 
 if __name__ == "__main__":
