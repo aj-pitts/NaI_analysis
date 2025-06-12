@@ -24,7 +24,6 @@ def get_args():
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('-v', '--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
-    parser.add_argument('-m', '--mask', help = "Mask velocities by S/N & EW combination configuration (default: False)", action='store_true',default=False)
     
     return parser.parse_args()
 
@@ -72,8 +71,8 @@ def main(args):
     redshift_mapdict = file_handler.standard_map_dict(galname, zmap_dict, HDU_keyword="REDSHIFT", IMAGE_units="")
 
     ####### S/N NaD #######
-    snr_map, snr_header = maps.NaI_SNR.NaD_snr_map(galname, cubefile, mapsfile, zmap_dict['Redshift Map'], verbose=verbose)
-    snr_mapdict = file_handler.standard_map_dict(galname, snr_map, custom_header_dict=snr_header)
+    snr_dict, snr_header = maps.NaI_SNR.NaD_snr_map(galname, cubefile, mapsfile, zmap_dict['Redshift Map'], verbose=verbose)
+    snr_mapdict = file_handler.standard_map_dict(galname, snr_dict, custom_header_dict=snr_header)
 
     ####### EQ W NaD #######
     ewmap_dict = maps.NaI_EW.measure_EW(cubefile, mapsfile, z_config, verbose=verbose)
@@ -93,23 +92,8 @@ def main(args):
     mcmc_cubedict = file_handler.standard_map_dict(galname, mcmc_dict, custom_header_dict=mcmc_header)
 
     ####### NaD VELOCITY #######
-    vmap_dict = maps.NaI_Velocity.make_vmap(cubefile, mapsfile, mcmc_table, verbose=verbose)
-
-
-    if args.mask:
-        print('Applying user set thresholds to velocity mask')
-        maps.NaI_Velocity.apply_velocity_mask(galname, bin_method, spatial_bins, vmap_dict['Vel Map Mask'], 
-                                            ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map['NaI_SNR'], verbose=verbose)
-        
-        threshold_dict = file_handler.threshold_parser(galname, bin_method)
-
-        util.verbose_print(verbose, 'Updating V vs EW plots')
-        inspect.inspect_vel_ew(ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map["NaI_SNR"], vmap_dict['Vel Map'], 
-                               spatial_bins, inspect_figures_dir, thresholds=threshold_dict['ew'], verbose = verbose)
-    else:
-        print(f"Not masking velocities by threshold. Plotting velocity versus eq_w")
-        inspect.inspect_vel_ew(ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'], snr_map["NaI_SNR"], vmap_dict['Vel Map'], 
-                               spatial_bins, inspect_figures_dir, verbose = verbose)
+    vmap_dict = maps.NaI_Velocity.make_vmap(galname, bin_method, cubefile, mapsfile, mcmc_table, ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'],
+                                            snr_dict['NaI_SNR'], verbose=verbose)
         
     
     velocity_hduname = "V_NaI"
@@ -130,7 +114,7 @@ def main(args):
     
     ####### HII #######
     maps.Hii.write_fluxes(galname, bin_method, exists_ok=True, verbose=verbose)
-    hii_dict, hii_header = maps.Hii.get_hii_mapdict(galname, bin_method, verbose=verbose)
+    hii_dict, hii_header = maps.Hii.get_hii_mapdict(galname, bin_method, placeholder=True, verbose=verbose)
     hii_mapdict = file_handler.standard_map_dict(galname, hii_dict, custom_header_dict=hii_header)
 
     util.verbose_print(verbose, f"Analysis Complete!\nPreparing to write data to {output_dir}.")
