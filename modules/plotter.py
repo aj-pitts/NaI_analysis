@@ -32,6 +32,9 @@ def standard_plotting(galname, bin_method, corr_key, mapsfile, verbose=False):
 
     util.verbose_print(verbose, "Creating plots...")
 
+    map_plotter(galname, bin_method, hdul['nai_snr'].data, 'NAI_SNR', results_dir, r'$S/N_{\mathrm{Na\ D}}$', '', 'managua',
+                0, 100, histogram=True, verbose=verbose)
+
     map_plotter(galname, bin_method, hdul['ew_nai'].data, 'EW_NAI', results_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
                 -0.2, 1.5, mask = hdul['ew_nai_mask'].data, histogram=True, verbose=verbose)
     
@@ -107,6 +110,7 @@ def map_plotter(galname, bin_method, image, fig_keyword, save_path, label, units
 
         bin_width = 3.5 * standard_deviation / (masked_data.size ** (1/3))
         nbins = (max(masked_data) - min(masked_data)) / bin_width
+        nbins = len(masked_data)//100 if not np.isfinite(nbins) else nbins
         plt.figure()
         plt.hist(masked_data,bins=int(nbins),color='k')
         plt.xlabel(label)
