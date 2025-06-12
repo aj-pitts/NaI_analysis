@@ -84,6 +84,20 @@ def get_data_path(subdir=None):
     
     return data_path
 
+def get_fig_paths(galname, bin_method, subdir=None):
+    an_plans = analysis_plans()
+    local_path = get_data_path(subdir='local')
+    local_outputs = os.path.join(local_path, 'local_outputs')
+    local_gal_dir = os.path.join(local_outputs, f"{galname}-{bin_method}", 'BETA-CORR', an_plans)
+    fig_path = os.path.join(local_gal_dir, 'figures')
+
+    if subdir is not None:
+        valid_subdirs = {'dap', 'inspection', 'results'}
+        if subdir not in valid_subdirs:
+            raise ValueError(f"{subdir} is not a valid subdirectory. Must be one of {valid_subdirs}")
+        fig_path = os.path.join(fig_path, subdir)
+    
+    return fig_path
 
 def timer(func):
     """
