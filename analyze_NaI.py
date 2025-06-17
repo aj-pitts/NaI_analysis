@@ -24,6 +24,7 @@ def get_args():
     parser.add_argument('galname',type=str,help='Input galaxy name.')
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('-v', '--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
+    parser.add_argument('-mm', '--manual', help='Manually set EW thresholds for masking in thresholds.yaml. (Default: False)', action='store_true', default=False)
     
     return parser.parse_args()
 
@@ -32,6 +33,7 @@ def main(args):
     galname = args.galname
     bin_method = args.bin_method
     verbose = args.verbose
+    manual = args.manual
     analysis_plan = defaults.analysis_plans()
     corr_key = 'BETA-CORR'
 
@@ -93,7 +95,7 @@ def main(args):
 
     ####### NaD VELOCITY #######
     vmap_dict = maps.NaI_Velocity.make_vmap(galname, bin_method, cubefile, mapsfile, mcmc_table, ewmap_dict['EW Map'], ewmap_dict['EW Map Mask'],
-                                            snr_dict['NaI_SNR'], verbose=verbose)
+                                            snr_dict['NaI_SNR'], manual=manual, verbose=verbose)
         
     
     velocity_hduname = "V_NaI"
