@@ -14,7 +14,7 @@ from modules import defaults, file_handler, util, plotter, inspect
 import mcmc_results
 
 
-def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_mask, snrmap, verbose=False):
+def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_mask, snrmap, manual=False, verbose=False):
     cube = fits.open(cube_fil)
     maps = fits.open(maps_fil)
     if cube['primary'].header['dapqual'] == 30:
@@ -91,7 +91,7 @@ def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_
         frac_map[w] = frac
         vel_map[w] = velocity
 
-    apply_velocity_mask(galname, bin_method, binid, vel_map, vmap_mask, ewmap, ewmap_mask, snrmap, verbose=verbose)
+    apply_velocity_mask(galname, bin_method, binid, vmap_mask, ewmap, snrmap, manual=manual, verbose=verbose)
 
     vmap_name = "Vel Map"
     vmap_dict = {f"{vmap_name}":vel_map, f"{vmap_name} Confidence":frac_map, f"{vmap_name} Mask":vmap_mask, f"{vmap_name} Uncertainty":vel_map_error}
@@ -99,16 +99,99 @@ def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_
     return vmap_dict
 
 
-def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map, velocity_map_mask, ewmap, ewmap_mask, snrmap, verbose = False):
-    inspect.inspect_vel_ew(galname, bin_method, ewmap, ewmap_mask, snrmap, velocity_map, spatial_bins, contour = True,
-                               verbose = True)
-    threshold_dict = file_handler.threshold_parser(galname, bin_method)
+def compute_ew_thresholds(galname, bin_method, scatter_lim = 75, verbose = False):
+    util.verbose_print(verbose, "Computing EW lims...")
 
-    if threshold_dict['ew_lims'] is None:
-        util.verbose_print(verbose, "No EW lims set. Skipping S/N and EW threshold mask.")
-        return
+    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
+    local_file = datapath_dict['LOCAL']
+    hdul = fits.open(local_file)
+
+    spatial_bins = hdul['spatial_bins'].data.flatten()
+    unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
+
+    snr = hdul['nai_snr'].data.flatten()[bin_inds]
+    ew = hdul['ew_nai'].data.flatten()[bin_inds]
+    ew_mask = hdul['ew_nai_mask'].data.flatten().astype(bool)[bin_inds]
+    velocity = hdul['v_nai'].data.flatten()[bin_inds]
+    # velocity_mask = hdul['v_nai_mask'].data.flatten()[bin_inds]
+    # velocity_mask[velocity_mask==12] = 0
+    # velocity_mask = velocity_mask.astype(bool)
+
+    threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+
+    data = {}
+    ew_lims = []
+
+    for (sn_low, sn_high) in threshold_dict['sn_lims']:
+        sn_low = int(sn_low) if np.isfinite(sn_low) else sn_low
+        sn_high = int(sn_high) if np.isfinite(sn_high) else sn_high
+
+        key = f"{sn_low}-{sn_high}"
+        data[key] = {}
+
+        w = (snr > sn_low) & (snr <= sn_high)
+        ## TODO
+        #datamask = np.logical_and(~velocity_mask, ~ew_mask)
+        #mask = np.logical_and(w, datamask)
+        mask = np.logical_and(w, ~ew_mask)
+        masked_ew = ew[mask]
+        masked_velocities = velocity[mask]
+
+        ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.1)
+
+        velocity_std = []
+        med_ew = []
+
+        for i in range(len(ew_bins) - 1):
+            ew_low = ew_bins[i]
+            ew_high = ew_bins[i+1]
+            ew_binmask = (masked_ew > ew_low) & (masked_ew <= ew_high)
+
+            vels = masked_velocities[ew_binmask]
+            if len(vels) < 15:
+                continue
+
+            std = np.std(vels)
+
+            velocity_std.append(std)
+            med_ew.append((ew_low + ew_high)/2)
+
+        velocity_std = np.array(velocity_std)
+        med_ew = np.array(med_ew)
+        cut = velocity_std < scatter_lim
+        if np.sum(cut) == 0:
+            ew_lim = np.inf
+        else:
+            ew_lim = np.min(med_ew[cut])
+
+        data[key]['std'] = velocity_std
+        data[key]['medew'] = med_ew
+        data[key]['ew_lim'] = ew_lim
+        ew_lims.append(ew_lim)
     
-    ## function to return the ew threshold
+    file_handler.write_thresholds(galname, ew_lims=ew_lims, overwrite=True)
+    util.verbose_print(verbose, "Done.")
+    inspect.inspect_vstd_ew(galname, bin_method, threshold_data=data, verbose=verbose)
+
+
+
+def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ewmap, snrmap, 
+                        manual = False, verbose = False):
+    if not manual:
+        compute_ew_thresholds(galname, bin_method, verbose=verbose)
+    
+    else: 
+        threshold_dict = file_handler.threshold_parser(galname, bin_method)
+        if threshold_dict['ew_lims'] is None:
+            print(f"Cannot apply velocity mask if using --manual and no thresholds written to thresholds.yaml")
+            print(f"Skipping Velocity Mask")
+            inspect.inspect_vel_ew(galname, bin_method, contour=True, verbose=verbose)
+            return
+            
+
+    threshold_dict = file_handler.threshold_parser(galname, bin_method)
+    
+    ## function to return the ew threshold given the snr
     def get_ew_cut(snr: float, thresholds: dict):
         for (sn_min, sn_max), ew_lim in zip(thresholds['sn_lims'], thresholds['ew_lims']):
             if sn_min < snr <= sn_max:
@@ -129,7 +212,7 @@ def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map, velocit
         ew_cut = get_ew_cut(sn, threshold_dict)
 
         if ewmap[y, x] < ew_cut:
-            velocity_map_mask[w] = 7
+            velocity_map_mask[w] = 12
 
 
 def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
@@ -198,7 +281,6 @@ def get_args():
     parser.add_argument('galname', type=str, help="Input galaxy name.")
     parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
     parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
-    parser.add_argument('-m', '--mask', help = "Mask velocities by S/N & EW combination (default: False)", action='store_true',default=False)
 
     return parser.parse_args()
 
