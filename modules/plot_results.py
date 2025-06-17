@@ -217,7 +217,7 @@ def plot_local_maps(galname, bin_method, local_maps_path, output_dir = None, ver
     plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI_masked', output_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
                 -250, 250, mask=hdul['v_nai_mask'].data, minmax=True, mask_ignore_list=[8], histogram=True, verbose=verbose)
     
-    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI', output_dir, r"$v_{\mathrm{Na\ D}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
+    plotter.map_plotter(galname, bin_method, hdul['v_nai'].data, 'V_NaI', output_dir, r"$v_{\mathrm{cen}}$", r"$\left( \mathrm{km\ s^{-1}} \right)$", 'seismic', 
                 -200, 200, minmax=True, histogram=True, verbose=verbose)
     
 
@@ -257,7 +257,7 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = 
         'EW':dict(image = ew, mask = ew_mask, cmap = 'rainbow', vmin=-0.2, vmax=2, v_str = r'$\mathrm{EW_{Na\ D}}\ \left( \mathrm{\AA} \right)$'),
 
         'SFRSD':dict(image = sfrsd, mask = sfrsd_mask, cmap = 'rainbow', vmin=-2.5, vmax=0, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$'),
-        'V_BULK':dict(image = v_bulk, mask = v_mask, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
+        'V_BULK':dict(image = v_bulk, mask = v_mask, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
         #'V_FRAC':dict(image = v_frac, cmap = 'Spectral', vmin = -1, vmax = 1, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
 
         #'logN':dict(image = logn, cmap = 'pink', vmin = 13, vmax = 16.5, v_str = r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$'),
@@ -609,6 +609,8 @@ def terminal_velocity(galname, bin_method, local_maps_path, output_dir = None, r
     outfil = os.path.join(output_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
     plt.savefig(outfil, bbox_inches='tight')
     verbose_print(verbose, f"Terminal velocity vs SFR fig saved to {outfil}")    
+
+
 
 def get_args():
     parser = argparse.ArgumentParser(description="A script to create/overwrite plots without rerunning analyze_NaI")
