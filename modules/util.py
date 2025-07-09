@@ -329,3 +329,24 @@ def unpack_param(param):
         value, uncertainty = param, None
 
     return value, uncertainty
+
+def mask_arrays(truth_array, *arrays):
+    """
+    Filter multiple arrays using a boolean truth array.
+    
+    Parameters:
+    truth_array: boolean array for indexing
+    *arrays: variable number of arrays to filter
+    
+    Returns:
+    tuple of filtered arrays in the same order as input
+    """
+
+    if len(arrays) == 0:
+        raise ValueError("At least one array must be provided")
+    
+    for i, arr in enumerate(arrays):
+        if len(arr) != len(truth_array):
+            raise ValueError(f"Array {i} has length {len(arr)}, but truth_array has length {len(truth_array)}")
+        
+    return tuple(arr[truth_array] for arr in arrays)
