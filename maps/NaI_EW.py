@@ -6,7 +6,17 @@ import os
 from tqdm import tqdm
 from modules import defaults, util, file_handler, plotter
 
-def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
+
+def boxcar_EW(wavelengths, wavelength_error, normflux, normflux_error):
+    ones = np.ones(len(normflux))
+    dLambda = np.gradient(wavelengths) #np.array([np.median(np.diff(wavelengths)) * len(normflux)]) # Delta lambda
+    dLambda_sigma = np.gradient(wavelength_error) #np.array([np.median(np.diff(wavelength_error)) * len(normflux)])
+
+    EW = np.sum(  (( ones - normflux ) * dLambda)  )
+    EW_err = np.sqrt( np.sum( ((dLambda * normflux_error)**2 + ((ones - normflux) * dLambda_sigma)**2) ) )
+    return EW, EW_err
+
+def measure_EW(galname, bin_method, verbose=False, write_data = True):
     """
     Measure the equivalent width (EW) of spectral features in a DAP 3D data cube.
 
@@ -63,136 +73,173 @@ def measure_EW(cubefil, mapfil, z_guess, verbose=False, bokeh=False):
     >>> measure_EW("spectra_cube.fits", "reference_map.fits", 0.03, bokeh=True)
     
     """
-
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    
     ## initialize values
     c = 2.998e5 #speed of light km/s
-    
-    ## check if the redshift from the config file is in string format
-    if isinstance(z_guess, str):
-        z_guess = float(z_guess)
         
     ## init the data
-    cube = fits.open(cubefil)
-    maps = fits.open(mapfil)
+    cube = fits.open(datapath_dict['LOGCUBE'])
+    local = fits.open(datapath_dict['LOCAL'])
     
     flux = cube['FLUX'].data
     ivar = cube['IVAR'].data
     mask = cube['MASK'].data #DAPSPECMASK
-
     wave = cube['WAVE'].data
-
     model = cube['MODEL'].data
     model_mask = cube['MODEL_MASK'].data #DAPSPECMASK
-    
-    stellarvel = maps['STELLAR_VEL'].data
-    stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
-    stellarvel_ivar = maps['STELLAR_VEL_IVAR'].data
+    binids = cube['BINID'].data 
 
-    binids = maps['BINID'].data 
+    zmap = local['redshift'].data
+    zmap_error = local['redshift_error'].data
+    zmap_mask = local['redshift_mask'].data
+
+
     spatial_bins = binids[0]
-
     uniqids = np.unique(spatial_bins)
     
 
     ## define the Na D window bounds
-    region = 5880, 5910
+    nad_region = 5885, 5905
+    continuum_lims = [(5850, 5870), (5910, 5930)]
     
     ## init empty arrays to write measurements to
     l, ny, nx = flux.shape
     ewmap = np.zeros((ny,nx)) - 999.0
-    ewmap_unc = np.zeros((ny,nx)) - 999.0
+    ewmap_error = np.zeros((ny,nx)) - 999.0
     ewmap_mask = np.zeros((ny,nx))
-    wavecube = np.zeros(flux.shape)
+
+    ewmap_noem = np.zeros((ny,nx)) - 999.0
+    ewmap_noem_error = np.zeros((ny,nx)) - 999.0
+    ewmap_noem_mask = np.zeros((ny,nx))
 
     items = uniqids[1:]
     iterator = tqdm(uniqids[1:], desc="Constructing equivalent width map.") if verbose else items
 
-
     ## mask unused spaxels
     w = spatial_bins == -1
     ewmap_mask[w] = 6
+    ewmap_noem_mask[w] = 6
 
     for ID in iterator:
         w = spatial_bins == ID
-        y, x = np.where(w)
-
-        bin_check = util.check_bin_ID(ID, spatial_bins, DAPPIXMASK_list=[stellarvel_mask],
-                                      stellar_velocity_map=stellarvel)
+        ny, nx = np.where(w)
+        y, x = ny[0], nx[0]
         
-        ewmap_mask[w] = bin_check
+        zbin = zmap[y,x]
+        zbin_err = zmap_error[y,x]
+        zbin_mask = zmap_mask[y,x]
 
-        ## get the stellar velocity of the bin
-        sv = stellarvel[w][0]
-        sv_sigma = 1/np.sqrt(stellarvel_ivar[w][0])
+        if bool(zbin_mask):
+            ewmap_mask[w] = zmap_mask[y,x]
+            ewmap_noem_mask[w] = zmap_mask[y,x]
 
-        ## Calculate redshift
-        z = (sv * (1+z_guess))/c + z_guess
-        z_sigma = (sv_sigma/c) * (1 + z_guess)
+        ## shift wavelengths to restframe
+        restwave = wave / (1+zbin)
+        restwave_sigma = wave * zbin_err / (1 + zbin)**2
 
-        # shift wavelengths to restframe
-        restwave = wave / (1+z)
-        restwave_sigma = wave * z_sigma / (1 + z)**2
+        ## extract 1D arrays of the bin
+        flux_bin = flux[:, y, x]
+        ivar_bin = ivar[:, y, x]
+        flux_err = 1 / np.sqrt(ivar_bin)
+        mask_bin = util.spec_mask_handler(mask[:, y, x])
 
-        # TODO
-        if bokeh:
-            for dy,dx in zip(y,x):
-                wavecube[np.arange(len(restwave)),dy,dx] = restwave
-
-        # define wavelength boundaries and store a slice object to slice the datacubes
-        NaD_window = (restwave>region[0]) & (restwave<region[1])
-        NaD_window_inds = np.where(NaD_window)[0]
-        NaD_window_inds_wavelength = np.insert(NaD_window_inds, 0, int(NaD_window_inds[0]-1))
-        slice_inds = (NaD_window_inds[:, None], y[0], x[0])
-
-        # slice wavelength and uncertainty arrays to NaD window
-        wave_window = restwave[NaD_window_inds_wavelength]
-        wave_window_sigma = restwave_sigma[NaD_window_inds_wavelength]
-
-        # slice flux and model datacubes to bin, spaxel, and wavelength window
-        flux_sliced = np.array(flux[slice_inds]).ravel()
-        ivar_sliced = np.array(ivar[slice_inds]).ravel()
-        flux_sigma_sliced = 1 / np.sqrt(ivar_sliced)
-
-        mask_sliced = np.array(mask[slice_inds]).ravel()
-        model_sliced = np.array(model[slice_inds]).ravel()
-        model_mask_sliced = np.array(model_mask[slice_inds]).ravel()
-
-        ## change the DAPSPECMASKS from bitmasks to boolean array masks
-        flux_mask_bool = util.spec_mask_handler(mask_sliced).astype(bool)
-        model_mask_bool = util.spec_mask_handler(model_mask_sliced).astype(bool)
-        W_mask = np.logical_or(flux_mask_bool, model_mask_bool) # combined flux and model masks
-
-        ## compute equivalent width
-        cont = np.ones(len(flux_sliced)) # normalized continuum
-        dlam = np.diff(wave_window)# Delta lambda
-        dlam_sigma = np.hypot(wave_window_sigma[:-1], wave_window_sigma[1:]) # Delta lambda uncertainty
-
-
-        W = np.sum(( (cont - flux_sliced / model_sliced ) * dlam)[~W_mask]) # Equivalent width, masked before summming
-
-        W_sigma = np.sqrt( np.sum( ((dlam * flux_sigma_sliced/model_sliced)**2 + ((cont - flux_sliced/model_sliced) * dlam_sigma)**2)[~W_mask] ) ) # EW uncertainty
+        model_bin = model[:, y, x]
+        model_mask_bin = util.spec_mask_handler(model_mask[:, y, x])
         
+        ## combine DAP masks and finite values
+        datamask = np.logical_and(~mask_bin.astype(bool), ~model_mask_bin.astype(bool))
+        finite_mask = model_bin > 0
+        norm_mask = np.logical_and(datamask, finite_mask)
 
-        if not np.isfinite(W) or not np.isfinite(W_sigma):
-            if not np.isfinite(W):
-                ewmap[w] = -999
-                ewmap_mask[w] = 4
-            
-            if not np.isfinite(W_sigma):
-                ewmap_unc[w] = -999
-                ewmap_mask[w] = 5
+        ## normalize flux by the model with the masks
+        norm_flux = flux_bin[norm_mask] / model_bin[norm_mask]
+        norm_error = flux_err[norm_mask] / model_bin[norm_mask]
+        wavelength = restwave[norm_mask]
+        wavelength_error = restwave_sigma[norm_mask]
 
+        if len(norm_flux) == 0:
+            ewmap_mask[w] = 4
+            ewmap_noem_mask[w] = 4
             continue
 
-        ewmap[w] = W
-        ewmap_unc[w] = W_sigma
-    
-    #TODO
-    if bokeh:
-        keyword = f"{args.galname}-EW-bokeh"
-        #plotter.make_bokeh_map(flux, model, ivar, wavecube, ewmap, spatial_bins, savepath, keyword)
+        ## get the indices defining the Na D wavelength region
+        nad_inds = np.where((wavelength >= nad_region[0]) & (wavelength <= nad_region[1]))[0]
 
-    return {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_unc}
+        if len(nad_inds) < 10:
+            ewmap_mask[w] = 4
+            ewmap_noem_mask[w] = 4
+            continue
+
+        ## extract Na D values
+        norm_flux_nad = norm_flux[nad_inds]
+        norm_error_nad = norm_error[nad_inds]
+        restwave_nad = wavelength[nad_inds]
+        restwave_error_nad = wavelength_error[nad_inds]
+
+        ## compute equivalent width
+        EW, EW_err = boxcar_EW(restwave_nad, restwave_error_nad, norm_flux_nad, norm_error_nad)
+
+        if np.isfinite(EW):
+            ewmap[w] = EW
+        else:
+            ewmap_mask[w] = 4
+
+        if np.isfinite(EW_err):
+            ewmap_error[w] = EW_err
+        else:
+            ewmap_mask[w] = 5
+
+        ## compute EW again with emline masking
+        blue_lims = continuum_lims[0]
+        blue_inds = np.where((restwave > blue_lims[0]) & (restwave < blue_lims[1]))[0]
+
+        red_lims = continuum_lims[1]
+        red_inds = np.where((restwave > red_lims[0]) & (restwave < red_lims[1]))[0]
+
+        continuum_inds = np.concatenate([blue_inds, red_inds])
+        norm_flux_continuum = norm_flux[continuum_inds]
+
+        continuum_filter = (norm_flux_continuum > np.median(norm_flux_continuum) - np.std(norm_flux_continuum)) & (norm_flux_continuum < np.median(norm_flux_continuum) + np.std(norm_flux_continuum))
+        continuum_filtered = norm_flux_continuum[continuum_filter]
+
+        median = np.median(continuum_filtered)
+        std = np.std(continuum_filtered)
+        emline_threshold = median + std
+
+        flux_filter = norm_flux_nad < emline_threshold
+
+        norm_flux_nad = norm_flux_nad[flux_filter]
+        norm_error_nad = norm_error_nad[flux_filter]
+        restwave_nad = restwave_nad[flux_filter]
+        restwave_error_nad = restwave_error_nad[flux_filter]
+
+        if len(norm_flux_nad)<=5:
+            ewmap_noem_mask[w] = 4
+            continue
+
+        EW_noem, EW_err_noem = boxcar_EW(restwave_nad, restwave_error_nad, norm_flux_nad, norm_error_nad)
+
+        if np.isfinite(EW_noem):
+            ewmap_noem[w] = EW_noem
+        else:
+            ewmap_noem_mask[w] = 4
+
+        if np.isfinite(EW_err_noem):
+            ewmap_noem_error[w] = EW_err_noem
+        else:
+            ewmap_noem_mask[w] = 5
+
+    EW_dict = {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_error}
+    EW_noem_dict = {"EW NOEM Map":ewmap_noem, "EW NOEM Mask":ewmap_noem_mask, "EW NOEM Uncertainty":ewmap_noem_error}
+
+    if write_data:
+        ew_mapdict = file_handler.standard_map_dict(galname, EW_dict, HDU_keyword="EW_NAI", IMAGE_units="Angstrom")
+        ew_noem_mapdict = file_handler.standard_map_dict(galname, EW_noem_dict, HDU_keyword="EW_NOEM", IMAGE_units="Angstrom")
+        file_handler.write_maps_file(galname, bin_method, [ew_mapdict, ew_noem_mapdict], verbose=verbose, preserve_standard_order=True)
+    else:
+        return EW_dict, EW_noem_dict
+
 
 
 def get_args():
@@ -203,7 +250,6 @@ def get_args():
     parser.add_argument('bin_method', type = str, help = 'Input DAP spatial binning method.')
 
     parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
-    parser.add_argument('-ow', '--overwrite', help = "Write into any existing map file. Overwrite any equivalent data stored inside. (default: True)", action = 'store_false', default = True)
     parser.add_argument('-z', '--redshift', type=str, help='Use this extension to optionally input a galaxy redshift guess. (default: None)', default=None)
 
     parser.add_argument('--bokeh', type = bool, help = "Broken (default: False)", default = False)
@@ -252,9 +298,6 @@ def main(args):
     hdu_name = "EW_NAI"
     units = "Angstrom"
     mapdict = file_handler.standard_map_dict(args.galname, EW_dict, HDU_keyword=hdu_name, IMAGE_units=units)
-    
-    # file_handler.simple_file_handler(f"{args.galname}-{args.bin_method}", mapdict, 'EW-map', gal_local_dir,
-    #                                  overwrite= args.overwrite, verbose= args.verbose)
     
     file_handler.map_file_handler(f"{args.galname}-{args.bin_method}", [mapdict], gal_local_dir, verbose=args.verbose)
 

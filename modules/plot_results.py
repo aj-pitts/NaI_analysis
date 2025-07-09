@@ -207,9 +207,12 @@ def plot_local_maps(galname, bin_method, local_maps_path, output_dir = None, ver
 
     plotter.map_plotter(galname, bin_method, hdul['nai_snr'].data, 'NAI_SNR', output_dir, r'$S/N_{\mathrm{Na\ D}}$', '', 'managua',
                 0, 100, histogram=True, verbose=verbose)
-
+    
     plotter.map_plotter(galname, bin_method, hdul['ew_nai'].data, 'EW_NAI', output_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
-                -0.2, 1.5, mask = hdul['ew_nai_mask'].data, histogram=True, verbose=verbose)
+                -0.5, 2, mask = hdul['ew_nai_mask'].data, histogram=True, verbose=verbose)
+    
+    plotter.map_plotter(galname, bin_method, hdul['ew_noem'].data, 'EW_NOEM', output_dir, r'$\mathrm{EW_{Na\ D}}$', r'$\left( \mathrm{\AA} \right)$', 'rainbow',
+                -0.5, 2, mask = hdul['ew_noem_mask'].data, histogram=True, verbose=verbose)
     
     plotter.map_plotter(galname, bin_method, hdul['sfrsd'].data, 'SFRSD', output_dir, r"$\mathrm{log \Sigma_{SFR}}$", r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$",
                 'rainbow', -2.5, 0, mask = hdul['sfrsd_mask'].data, histogram=True, verbose=verbose)
@@ -228,14 +231,14 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = 
     
     
     snr = hdul['nai_snr'].data
-    ew = hdul['ew_nai'].data
+    ew = hdul['ew_noem'].data
     sfrsd = hdul['sfrsd'].data
     v_bulk = hdul['v_nai'].data
 
     if mask:
         #snr_mask = hdul['nai_snr_mask'].data.astype(bool)
         snr_mask = snr <= 0
-        ew_mask = hdul['ew_nai_mask'].data.astype(bool)
+        ew_mask = hdul['ew_nai_mask'].data[1].astype(bool)
         sfrsd_mask = hdul['sfrsd_mask'].data.astype(bool)
         v_mask = hdul['v_nai_mask'].data.astype(bool)
     else:

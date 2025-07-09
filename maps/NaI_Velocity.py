@@ -14,9 +14,14 @@ from modules import defaults, file_handler, util, plotter, inspect
 import mcmc_results
 
 
-def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_mask, snrmap, manual=False, verbose=False):
-    cube = fits.open(cube_fil)
-    maps = fits.open(maps_fil)
+def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    mcmc_table = mcmc_results.combine_mcmc_results(datapath_dict['MCMC'])
+
+    cube = fits.open(datapath_dict['LOGCUBE'])
+    maps = fits.open(datapath_dict['MAPS'])
+    local = fits.open(datapath_dict['LOCAL'])
+
     if cube['primary'].header['dapqual'] == 30:
         raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
 
@@ -27,10 +32,14 @@ def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_
 
     stellarvel = maps['STELLAR_VEL'].data
     stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
+    
+    ewmap = local['ew_noem'].data
+    snrmap = local['nai_snr'].data
 
     vel_map = np.zeros(binid.shape) - 999.
 
-    vel_map_error = np.zeros((2, binid.shape[0], binid.shape[1])) - 999.
+    vel_map_error_upper = np.zeros(binid.shape) - 999.
+    vel_map_error_lower = np.zeros(binid.shape) - 999.
     vmap_mask = np.zeros_like(vel_map)
 
     frac_map = np.zeros_like(vel_map)
@@ -60,28 +69,22 @@ def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_
         lambda_samples = mcmc_table[ind]['lambda samples']
         percentiles = mcmc_table[ind]['percentiles']
 
-        lambda_percentiles = percentiles[0]
+        lambda_median, lambda_err_upper, lambda_err_lower = percentiles[0]
 
-        lambda_16 = lambda_percentiles[1]
-        lambda_84 = lambda_percentiles[2]
-
-        velocity_16 = c * lambda_16 / lamrest
-        velocity_84 = c * lambda_84 / lamrest
-
-        vel_map_error[0][w] = velocity_16
-        vel_map_error[1][w] = velocity_84
+        velocity_err_upper = c * lambda_err_upper / lamrest
+        velocity_err_lower = c * lambda_err_lower / lamrest
 
         if not np.isfinite(velocity):
             vmap_mask[w] = 4
             velocity = -999
 
-        if not np.isfinite(velocity_16) or not np.isfinite(velocity_84):
-            vmap_mask[w] = 5
-            velocity_16 = -999
-            velocity_84 = -999
-
-        if np.mean([abs(velocity_16), abs(velocity_84)]) >= 30:
+        if max(abs(velocity_err_upper), abs(velocity_err_lower)) >= 30:
             vmap_mask[w] = 8
+
+        if not np.isfinite(velocity_err_upper) or not np.isfinite(velocity_err_lower):
+            vmap_mask[w] = 5
+            velocity_err_upper = -999
+            velocity_err_lower = -999
 
         if velocity == 0 or velocity == -999:
             frac = 0
@@ -90,16 +93,34 @@ def make_vmap(galname, bin_method, cube_fil, maps_fil, mcmc_table, ewmap, ewmap_
 
         frac_map[w] = frac
         vel_map[w] = velocity
+        vel_map_error_upper[w] = velocity_err_upper
+        vel_map_error_lower[w] = velocity_err_lower
 
-    apply_velocity_mask(galname, bin_method, binid, vmap_mask, ewmap, snrmap, manual=manual, verbose=verbose)
+
+    vel_map_error = np.stack([vel_map_error_lower, vel_map_error_upper], axis=0)
+
+    threshold_mask = apply_velocity_mask(galname, bin_method, vel_map, vel_map_error, manual=manual, verbose=verbose)
+    w = np.logical_and(threshold_mask.astype(bool), ~vmap_mask.astype(bool))
+    vmap_mask[w] = 7
 
     vmap_name = "Vel Map"
     vmap_dict = {f"{vmap_name}":vel_map, f"{vmap_name} Confidence":frac_map, f"{vmap_name} Mask":vmap_mask, f"{vmap_name} Uncertainty":vel_map_error}
 
-    return vmap_dict
+    if write_data:
+        velocity_hduname = "V_NaI"
+        additional_data = ["V_NaI_FRAC"]
+        additional_units = ['']
+        additinoal_description = ['Fractional confidence of NaI_VELOCITY']
+        units = "km / s"
+        velocity_mapdict = file_handler.standard_map_dict(galname, vmap_dict, HDU_keyword=velocity_hduname, IMAGE_units=units,
+                                                        additional_keywords=additional_data, additional_units=additional_units, 
+                                                        additional_descriptions=additinoal_description, asymmetric_error=True)
+        file_handler.write_maps_file(galname, bin_method, [velocity_mapdict], verbose=verbose)
+    else:
+        return vmap_dict
 
 
-def compute_ew_thresholds(galname, bin_method, scatter_lim = 75, verbose = False):
+def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, verbose = False):
     util.verbose_print(verbose, "Computing EW lims...")
 
     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
@@ -110,12 +131,21 @@ def compute_ew_thresholds(galname, bin_method, scatter_lim = 75, verbose = False
     unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
 
     snr = hdul['nai_snr'].data.flatten()[bin_inds]
-    ew = hdul['ew_nai'].data.flatten()[bin_inds]
-    ew_mask = hdul['ew_nai_mask'].data.flatten().astype(bool)[bin_inds]
-    velocity = hdul['v_nai'].data.flatten()[bin_inds]
-    # velocity_mask = hdul['v_nai_mask'].data.flatten()[bin_inds]
-    # velocity_mask[velocity_mask==12] = 0
-    # velocity_mask = velocity_mask.astype(bool)
+    ew = hdul['ew_noem'].data.flatten()[bin_inds]
+    ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
+    velocity = vmap.flatten()[bin_inds]
+    if vmap_error.ndim == 3:
+        vmap_error = np.mean(vmap_error, axis=0)
+    velocity_error = vmap_error.flatten()[bin_inds]
+    
+
+    if vmap_mask is not None:
+        velocity_mask = vmap_mask.flatten()[bin_inds]
+        velocity_mask[velocity_mask==7] = 0
+        velocity_mask = velocity_mask.astype(bool)
+        datamask = np.logical_and(velocity_mask, ew_mask)
+    else:
+        datamask = ew_mask
 
     threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
 
@@ -130,16 +160,15 @@ def compute_ew_thresholds(galname, bin_method, scatter_lim = 75, verbose = False
         data[key] = {}
 
         w = (snr > sn_low) & (snr <= sn_high)
-        ## TODO
-        #datamask = np.logical_and(~velocity_mask, ~ew_mask)
-        #mask = np.logical_and(w, datamask)
-        mask = np.logical_and(w, ~ew_mask)
+
+        mask = np.logical_and(w, ~datamask)
         masked_ew = ew[mask]
         masked_velocities = velocity[mask]
+        masked_errors = velocity_error[mask]
 
-        ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.1)
+        ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.2)
 
-        velocity_std = []
+        velocity_stat = []
         med_ew = []
 
         for i in range(len(ew_bins) - 1):
@@ -148,37 +177,46 @@ def compute_ew_thresholds(galname, bin_method, scatter_lim = 75, verbose = False
             ew_binmask = (masked_ew > ew_low) & (masked_ew <= ew_high)
 
             vels = masked_velocities[ew_binmask]
-            if len(vels) < 15:
+            errs = masked_errors[ew_binmask]
+            if len(vels) < 10:
                 continue
+            
+            stat = np.median(errs) if error else np.std(vels)
 
-            std = np.std(vels)
-
-            velocity_std.append(std)
+            velocity_stat.append(stat)
             med_ew.append((ew_low + ew_high)/2)
 
-        velocity_std = np.array(velocity_std)
+        velocity_stat = np.array(velocity_stat)
         med_ew = np.array(med_ew)
-        cut = velocity_std < scatter_lim
+        cut = velocity_stat < scatter_lim
         if np.sum(cut) == 0:
             ew_lim = np.inf
         else:
             ew_lim = np.min(med_ew[cut])
 
-        data[key]['std'] = velocity_std
+        data[key]['std'] = velocity_stat
         data[key]['medew'] = med_ew
         data[key]['ew_lim'] = ew_lim
         ew_lims.append(ew_lim)
     
     file_handler.write_thresholds(galname, ew_lims=ew_lims, overwrite=True)
     util.verbose_print(verbose, "Done.")
-    inspect.inspect_vstd_ew(galname, bin_method, threshold_data=data, verbose=verbose)
+    inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, scatter_lim=scatter_lim, verbose=verbose)
 
 
 
-def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ewmap, snrmap, 
-                        manual = False, verbose = False):
+def apply_velocity_mask(galname, bin_method, vmap, vmap_error, vmap_mask = None, manual = False, verbose = False):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    local = fits.open(datapath_dict['LOCAL'])
+
+    spatial_bins = local['spatial_bins'].data
+    ewmap = local['ew_noem'].data
+    snrmap = local['nai_snr'].data
+    
+    threshold_mask = np.zeros_like(spatial_bins)
+
     if not manual:
-        compute_ew_thresholds(galname, bin_method, verbose=verbose)
+        compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask, verbose=verbose)
     
     else: 
         threshold_dict = file_handler.threshold_parser(galname, bin_method)
@@ -212,26 +250,30 @@ def apply_velocity_mask(galname, bin_method, spatial_bins, velocity_map_mask, ew
         ew_cut = get_ew_cut(sn, threshold_dict)
 
         if ewmap[y, x] < ew_cut:
-            velocity_map_mask[w] = 12
+            threshold_mask[w] = 7
+
+    return threshold_mask
 
 
-def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
-    cube = fits.open(cube_fil)
+def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+
+    cube = fits.open(datapath_dict['LOGCUBE'])
+    local = fits.open(datapath_dict['LOCAL'])
 
     binid = cube['BINID'].data[0]
+    
+    vmap = local['v_nai'].data
+    vmap_mask = local['v_nai_mask'].data
+    vmap_error = local['v_nai_error'].data
 
-    doppler_param = mcmc_dict['MCMC Results'][2]
-    doppler_param_16 = mcmc_dict['MCMC 16th Percentile'][2]
-    doppler_param_84 = mcmc_dict['MCMC 84th Percentile'][2]
+    doppler_param = local['mcmc_results'].data[2]
+    doppler_param_16 = local['mcmc_16th_perc'].data[2]
+    doppler_param_84 = local['mcmc_84th_perc'].data[2]
 
-    vmap = vmap_dict['Vel Map']
-    vmap_mask = vmap_dict['Vel Map Mask']
-    vmap_error = vmap_dict['Vel Map Uncertainty']
-    #frac = vmap_dict['Vel Map Confidence']
-
-    term_vmap = np.zeros_like(binid)
-    term_vmap_mask = np.zeros_like(binid)
-    term_vmap_error = np.zeros((2, binid.shape[0], binid.shape[1]))
+    term_vmap = np.zeros_like(vmap)
+    term_vmap_mask = np.zeros_like(vmap)
+    term_vmap_error = np.zeros_like(vmap_error)
 
     items = np.unique(binid[1:])
     iterator = tqdm(items, desc="Constructing terminal velocity outflow map") if verbose else items
@@ -257,10 +299,6 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
             term_vmap_mask[w] = 9
             continue
         
-        # if bin_frac < .95:
-        #     term_vmap_mask[w] = 10
-        #     continue
-        
         bin_bD = doppler_param[y, x]
         bD_upper = doppler_param_84[y, x]
         bD_lower = doppler_param_16[y, x]
@@ -271,7 +309,16 @@ def make_terminal_vmap(vmap_dict, mcmc_dict, cube_fil, verbose = False):
         term_vmap_error[1][w] = np.sqrt( bin_vel_error_84**2 + (np.log(0.1) * bD_upper)**2 )
 
     name = "Vout"
-    return {f"{name}":term_vmap, f"{name} Mask":term_vmap_mask, f"{name} Uncertainty":term_vmap_error}
+    term_vdict = {f"{name}":term_vmap, f"{name} Mask":term_vmap_mask, f"{name} Uncertainty":term_vmap_error}
+    if write_data:
+        vout_hdu_name = "V_MAX_OUT"
+        units = "km / s"
+        additional_masks = [(9, 'Bin Sodium is redshifted'), (10,'Bin velocity confidence is < 95%')]
+        terminal_velocity_mapdict = file_handler.standard_map_dict(galname, term_vdict, HDU_keyword=vout_hdu_name, IMAGE_units=units, 
+                                                                additional_mask_bits=additional_masks, asymmetric_error=True)
+        file_handler.write_maps_file(galname,bin_method,[terminal_velocity_mapdict], verbose=verbose)
+    else:
+        return term_vdict
         
 
     

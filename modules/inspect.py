@@ -126,6 +126,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         row_idx = i // ncol  # Current row index
         col_idx = i % ncol   # Current column index
         # Calculate the number of subplots in the last row
+        is_last_row = (row_idx == nrow - 1)
         last_row_cols = total_subplots % ncol
         if last_row_cols == 0 and total_subplots != 0:
             last_row_cols = ncol  # If no remainder, the last row fills all columns
@@ -155,6 +156,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         ax1 = fig.add_subplot(gs[0])
 
         ax1.plot(restwave[inds], flux_1D[inds] / model_1D[inds], 'k', drawstyle='steps-mid')
+        ax1.hlines([1], xmin=NaD_window[0], xmax=NaD_window[1], colors='k', alpha=0.4, linewidths=0.5, linestyles='dashed')
 
         #ax.set_title(f"Bin {Bin}")
         ax1.text(.075,.85, f"Bin {Bin}", transform=ax1.transAxes)
@@ -167,9 +169,9 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
 
         ax1.fill_between([lambda_0-lambda_16, lambda_0+lambda_84], [-20, -20], [20, 20], color='r',
                         alpha=0.3)
-        ax1.vlines([lambda_0], -20, 20, colors = 'black', linestyles = 'dashed', linewidths = .6)
+        ax1.vlines([lambda_0], -20, 20, colors = 'black', linestyles = 'dashed', linewidths = 1)
 
-        ax1.vlines(NaD_rest, -20, 20, colors = 'dimgray', linestyles = 'dotted', linewidths = .5)
+        ax1.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
         
         ax1.set_ylim(.75, 1.2)
         ax1.set_xlim(NaD_window[0], NaD_window[1])
@@ -177,7 +179,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         ax1.set_xticklabels([])
 
 
-        ax2 = fig.add_subplot(gs[1], sharex = ax1)
+        ax2 = fig.add_subplot(gs[1])
 
         # min_flux = round(min(flux_1D[inds].min(), model_1D[inds].min()), 2)
         # max_flux = round(max(flux_1D[inds].max(), model_1D[inds].max()), 2)
@@ -185,21 +187,24 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
 
         ax2.plot(restwave[inds], flux_1D[inds] / med_flux, 'dimgray', drawstyle = 'steps-mid', lw=1.4)
         ax2.plot(restwave[inds], model_1D[inds] / med_flux, 'tab:blue', drawstyle = 'steps-mid', lw=1.1)
-
+        ax2.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
         
         ax2.set_ylim(.65, 1.2)
+        ax2.set_xlim(NaD_window[0], NaD_window[1])
         ax2.set_box_aspect(3/8)
 
         if col_idx >= 1:
             ax1.set_yticklabels([])
             ax2.set_yticklabels([])
 
-        if row_idx < nrow - 2:
-            #ax1.set_xticklabels([])
+        # Remove x tick labels on all rows except the last one
+        if not is_last_row:
             ax2.set_xticklabels([])
-        if row_idx == nrow - 2 and col_idx < last_row_cols:
-            #ax1.set_xticklabels([])
-            ax2.set_xticklabels([])
+
+        # (Optional) Handle second-to-last row cleanup only when last row is partial
+        if last_row_cols != ncol:
+            if row_idx == nrow - 2 and col_idx >= last_row_cols:
+                ax2.set_xticklabels([])
 
     fig.text(0.5, 0.05, r'Wavelength $\left( \mathrm{\AA} \right)$', ha='center', va='center', fontsize=fontsize)
     # fig.text(0.05, 0.5, r'Flux (top: Normalized, Bottom: $\left[ \mathrm{1E-17\ erg\ s^{-1}\ cm^{-2}\ \AA^{-1}\ spaxel^{-1}} \right]$)',
@@ -228,13 +233,16 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         plt.close()
 
 
-def inspect_vstd_ew(galname, bin_method, threshold_data, fig_save_dir = None, verbose=False):
+def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_mask = None, 
+                    ewnoem = False, scatter_lim = 30, fig_save_dir = None, verbose=False):
     if fig_save_dir is not None:
         check_filepath(fig_save_dir, mkdir=False, verbose=verbose)
     plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
 
     outpath = defaults.get_fig_paths(galname, bin_method, 'inspection') if fig_save_dir is None else fig_save_dir
-    out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_scatter.pdf')
+
+    file_end = '_maskedem' if ewnoem else ''
+    out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_scatter{file_end}.pdf')
 
     thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=False)
     snranges = thresholds['sn_lims']
@@ -248,14 +256,20 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, fig_save_dir = None, ve
     unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
 
     snr = hdul['nai_snr'].data.flatten()[bin_inds]
-    ew = hdul['ew_nai'].data.flatten()[bin_inds]
-    ew_mask = hdul['ew_nai_mask'].data.flatten().astype(bool)[bin_inds]
-    velocity = hdul['v_nai'].data.flatten()[bin_inds]
-    # velocity_mask = hdul['v_nai_mask'].data.flatten()[bin_inds]
-    # if np.sum(velocity_mask==12) > 0:
-    #     velocity_mask[velocity_mask==12] = 0
-    # velocity_mask = velocity_mask.astype(bool)
-    
+
+    hduname = 'ew_noem' if ewnoem else 'ew_nai'
+    ew = hdul[hduname].data.flatten()[bin_inds]
+    ew_mask = hdul[f'{hduname}_mask'].data.flatten().astype(bool)[bin_inds]
+
+    velocity = vmap.flatten()[bin_inds]
+    #velocity_err = vmap_error.flatten()[bin_inds]
+    if vmap_mask is not None:
+        velocity_mask = vmap_mask.flatten()[bin_inds]
+        velocity_mask[velocity_mask == 7] = 0
+        velocity_mask = velocity_mask.astype(bool)
+        datamask = np.logical_and(ew_mask, velocity_mask)
+    else:
+        datamask = ew_mask
 
     fig = plt.figure(figsize=(8,8))
 
@@ -265,15 +279,13 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, fig_save_dir = None, ve
 
         gs_parent = gridspec.GridSpec(2, 2, figure=fig)
         subplot_spec = gs_parent[i]  # Get the SubplotSpec
-        gs = subplot_spec.subgridspec(2, 1, height_ratios=[3,1], hspace=0.1)
+        gs = subplot_spec.subgridspec(2, 1, height_ratios=[2,1], hspace=0.1)
 
         ax1 = fig.add_subplot(gs[0])
         ax2 = fig.add_subplot(gs[1])
 
         w = (snr > sn_low) & (snr <= sn_high)
-        #datamask = np.logical_and(~ew_mask, velocity_mask)
-        #mask = np.logical_and(w, datamask)
-        mask = np.logical_and(w, ~ew_mask)
+        mask = np.logical_and(w, ~datamask)
         
         ew_bin = ew[mask]
         v_bin = velocity[mask]
@@ -297,13 +309,14 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, fig_save_dir = None, ve
         v_std = subdict['std']
         med_ew = subdict['medew']
         ax2.plot(med_ew, v_std, drawstyle='steps-mid', color='dimgray')
-        ax2.hlines([75], -10, 10, colors='k', linestyles='dashed', linewidths = 1)
+        ax2.set_yscale('log')
+        ax2.hlines([scatter_lim], -10, 10, colors='k', linestyles='dashed', linewidths = 1)
 
-        ax2.set_ylim(int(np.min(v_std)-50), int(np.max(v_std)+50))
+        ax2.set_ylim(0, 1000)
         ax2.set_xlim(-1, 3)
         ax2.tick_params(labelsize=12)
 
-        ax2.set_ylabel(r'$\sigma_{v_{\mathrm{cen}}}$', fontsize=14)
+        ax2.set_ylabel(r'$\mathrm{med}\ \sigma_{v_{\mathrm{cen}}}$', fontsize=14)
         if i == 1 or i == 3:
             ax1.set_ylabel('')
             ax2.set_ylabel('')
@@ -517,6 +530,7 @@ def main(args):
     verbose = args.verbose
 
     threshold_bins(galname, bin_method, nbins=nbins, verbose=verbose)
+
 
 if __name__ == '__main__':
     args = get_args()

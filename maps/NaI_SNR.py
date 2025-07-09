@@ -1,11 +1,14 @@
 import numpy as np
 from astropy.io import fits
 from tqdm import tqdm
+from modules import file_handler
 
 
-def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
-    cube = fits.open(cube_fil)
-    maps = fits.open(maps_fil)
+def NaD_snr_map(galname, bin_method, zmap = None, verbose=False, write_data = True):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+
+    cube = fits.open(datapath_dict['LOGCUBE'])
+    maps = fits.open(datapath_dict['MAPS'])
 
     spatial_bins = cube['BINID'].data[0]
     fluxcube = cube['FLUX'].data
@@ -13,6 +16,10 @@ def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
     wave = cube['WAVE'].data
 
     stellarvel = maps['STELLAR_VEL'].data
+
+    if zmap is None:
+        local = fits.open(datapath_dict['LOCAL'])
+        zmap = local['redshift'].data
 
     snr_map = np.zeros_like(stellarvel)
     windows = [(5865, 5875), (5915, 5925)]
@@ -50,5 +57,11 @@ def NaD_snr_map(galname, cube_fil, maps_fil, zmap, verbose=False):
         }
     }
 
-    return {"NaI_SNR":snr_map}, snr_header
+    snr_dict = {"NaI_SNR":snr_map}
+
+    if write_data:
+        snr_mapdict = file_handler.standard_map_dict(galname, snr_dict, custom_header_dict=snr_header)
+        file_handler.write_maps_file(galname, bin_method, [snr_mapdict], verbose=verbose)
+    else:
+        return snr_dict, snr_header
 

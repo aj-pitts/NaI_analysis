@@ -4,7 +4,7 @@ from tqdm import tqdm
 import os
 import re
 from astropy.table import Table
-from modules import util
+from modules import util, file_handler
 
 def sort_paths(mcmc_paths):
     def extract_run_number(filepath):
@@ -44,8 +44,10 @@ def combine_mcmc_results(mcmc_paths, verbose=False):
     return np.array(records, dtype=dtype)
 
 
-def make_mcmc_results_cube(galname, cube_fil, mcmc_table, verbose=False):
-    cube = fits.open(cube_fil)
+def make_mcmc_results_cube(galname, bin_method, verbose=False, write_data=True):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    mcmc_table = combine_mcmc_results(datapath_dict['MCMC'], verbose=verbose)
+    cube = fits.open(datapath_dict['LOGCUBE'])
     if cube['primary'].header['dapqual'] == 30:
         raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
 
@@ -124,7 +126,11 @@ def make_mcmc_results_cube(galname, cube_fil, mcmc_table, verbose=False):
             "AUTHOR":("Andrew Pitts","")
         }
     }
-    return mcmc_dict, mcmc_header_dict
+    if write_data:
+        mcmc_cubedict = file_handler.standard_map_dict(galname, mcmc_dict, custom_header_dict=mcmc_header_dict)
+        file_handler.write_maps_file(galname, bin_method, [mcmc_cubedict], verbose=verbose, preserve_standard_order=True)
+    else:
+        return mcmc_dict, mcmc_header_dict
 
 
 

@@ -624,6 +624,113 @@ def map_file_handler(galdir, maps_dict_list, filepath, verbose = False, preserve
         verbose_print(verbose, f"Updated Images: {existing_name_output}")
         verbose_print(verbose, f"New Images: {new_name_output}")
 
+def write_maps_file(
+    galname,
+    bin_method,
+    maps_dict_list,
+    verbose=False,
+    preserve_standard_order=True,
+):
+    """
+    Incrementally updates or creates a FITS file by writing maps one at a time.
+
+    Parameters
+    ----------
+    galdir : str
+        Galaxy name prefix.
+    maps_dict_list : list of dict
+        Each dict maps EXTNAME to (data, header_dict)
+    filepath : str
+        Directory for FITS file.
+    verbose : bool
+        Print verbose messages.
+    preserve_standard_order : bool
+        Whether to reorder extensions in standard order.
+
+    """
+    galdir = f'{galname}-{bin_method}'
+
+    # build the path
+    corr_key = 'BETA-CORR'
+    analysis_plan = defaults.analysis_plans()
+    local_data = defaults.get_data_path(subdir='local')
+    filepath = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plan)
+    file_name = f"{galdir}-local_maps.fits"
+    full_path = os.path.join(filepath, file_name)
+
+    # timestamp for updates
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # If file exists, open it
+    if os.path.isfile(full_path):
+        hdul = fits.open(full_path, mode='update')
+        existing_names = [hdu.name for hdu in hdul]
+        if verbose:
+            print(f"Updating existing FITS file: {full_path}")
+    else:
+        # create a new FITS file with PrimaryHDU
+        hdul = fits.HDUList([fits.PrimaryHDU()])
+        existing_names = []
+        if verbose:
+            print(f"Creating new FITS file: {full_path}")
+
+    # Process each map dictionary in the list
+    for maps_dict in maps_dict_list:
+        for extname, (data, header_dict) in maps_dict.items():
+            header_dict_formatted = header_dict_formatter(header_dict=header_dict)
+
+            # create new ImageHDU
+            new_hdu = fits.ImageHDU(data=data, name=extname)
+            for key, value in header_dict_formatted.items():
+                new_hdu.header[key] = value
+            new_hdu.header['UPDATED'] = (timestamp, "Last updated timestamp")
+
+            if extname in existing_names:
+                # Replace existing HDU
+                index = existing_names.index(extname)
+                if verbose:
+                    print(f"Overwriting HDU: {extname}")
+                hdul[index] = new_hdu
+            else:
+                # Append new HDU
+                if verbose:
+                    print(f"Adding new HDU: {extname}")
+                hdul.append(new_hdu)
+                existing_names.append(extname)
+
+    # Reorder if needed
+    if preserve_standard_order:
+        hdul = reorder_hdu(hdul)
+
+    # Write changes
+    hdul.writeto(full_path, overwrite=True)
+    hdul.close()
+
+    if verbose:
+        print(f"Finished writing to FITS file: {full_path}")
+
+def reorder_hdu(hdul):
+    HDUL_order = [
+        'SPATIAL_BINS',
+        'RADIUS',
+        'REDSHIFT', 'REDSHIFT_MASK', 'REDSHIFT_ERROR',
+        'NaI_SNR',
+        'EW_NAI', 'EW_NAI_MASK', 'EW_NAI_ERROR',
+        'EW_NOEM', 'EW_NOEM_MASK', 'EW_NOEM_ERROR'
+        'SFRSD', 'SFRSD_MASK', 'SFRSD_ERROR',
+        'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
+        'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
+        'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCMC_84TH_PERC',
+        'HII'
+    ]
+    primary_hdu = hdul[0]
+    sorted_hdus = [primary_hdu]
+    sorted_hdus += sorted(
+        hdul[1:],
+        key=lambda hdu: HDUL_order.index(hdu.name)
+        if hdu.name in HDUL_order else len(HDUL_order)
+    )
+    return fits.HDUList(sorted_hdus)
 #       
 # 
 # Configuration Files Section

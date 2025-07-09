@@ -1,10 +1,12 @@
 import numpy as np
 from astropy.io import fits
 from tqdm import tqdm
-from modules import util
+from modules import util, file_handler
 
-def redshift_map_dict(galaxy_redshift, mapfile, verbose = False):
-    maphdu = fits.open(mapfile)
+def redshift_map_dict(galname, bin_method, verbose = False, write_data = True):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    maphdu = fits.open(datapath_dict['MAPS'])
+    galaxy_redshift = datapath_dict['Z']
 
     spatial_bins = maphdu['binid'].data[0]
     stellar_vel = maphdu['stellar_vel'].data
@@ -45,4 +47,11 @@ def redshift_map_dict(galaxy_redshift, mapfile, verbose = False):
         zmap[w] = z
         zmap_error[w] = z_error
 
-    return {'Redshift Map':zmap, 'Redshift Map Mask':zmap_mask, 'Reshift Map Error':zmap_error}
+    map_dict = {'Redshift Map':zmap, 'Redshift Map Mask':zmap_mask, 'Reshift Map Error':zmap_error}
+
+    if write_data:
+        redshift_mapdict = file_handler.standard_map_dict(galname, map_dict, HDU_keyword="REDSHIFT", IMAGE_units="")
+        file_handler.write_maps_file(galname, bin_method, [redshift_mapdict], verbose=verbose, preserve_standard_order=True)
+
+    else: 
+        return map_dict

@@ -129,7 +129,6 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
     propagated to compute uncertainties for both SFR and SFRSD.
 
     """
-
     # get the local systematic redshift
     z = ((stellar_velocity * (1 + redshift))/c.value + redshift)
 
@@ -160,7 +159,7 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
 
     return SFRSD
 
-def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = False):
+def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data = True):
     """
     Measure the star formation rate (SFR) and star formation rate surface density (SFRSD) of 
     spectral features in a 3D data cube.
@@ -208,11 +207,10 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
         - 'SFRSD Uncertainty' : dict
             Array of propagated uncertainties associated with the SFRSD measurements.
     """
-    if isinstance(redshift, str):
-        redshift = float(redshift)
-
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
     # open the MAPS file
-    maps = fits.open(map_fil)
+    maps = fits.open(datapath_dict['MAPS'])
+    redshift = datapath_dict['Z']
 
     # stellar kinematics
     stellar_vel = maps['STELLAR_VEL'].data
@@ -275,7 +273,12 @@ def SFR_map(map_fil, redshift, flux_key = "GFLUX", verbose = False, bokeh = Fals
             continue
         SFRSD_map[w] = sfrsd
 
-    return {"SFRSD Map":SFRSD_map, "SFRSD Mask":SFRSD_mask, "SFRSD Uncertainty":SFRSD_sigma}
+    SFR_dict = {"SFRSD Map":SFRSD_map, "SFRSD Mask":SFRSD_mask, "SFRSD Uncertainty":SFRSD_sigma}
+    if write_data:
+        sfr_mapdict = file_handler.standard_map_dict(galname, SFR_dict, HDU_keyword="SFRSD", IMAGE_units=r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$")
+        file_handler.write_maps_file(galname, bin_method, [sfr_mapdict], verbose=verbose, preserve_standard_order=True)
+    else:
+        return SFR_dict
 
 
 def get_args():

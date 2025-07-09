@@ -105,17 +105,18 @@ def map_plotter(galname, bin_method, image, fig_keyword, save_path, label, units
         hist_path = os.path.join(save_path, hist_name)
 
         masked_data = image[~image_mask]
-        median = np.median(masked_data)
-        standard_deviation = np.std(masked_data)
+        # median = np.median(masked_data)
+        # standard_deviation = np.std(masked_data)
 
-        bin_width = 3.5 * standard_deviation / (masked_data.size ** (1/3))
-        nbins = (max(masked_data) - min(masked_data)) / bin_width
-        nbins = len(masked_data)//100 if not np.isfinite(nbins) else nbins
+        # bin_width = 3.5 * standard_deviation / (masked_data.size ** (1/3))
+        # nbins = (max(masked_data) - min(masked_data)) / bin_width
+        # nbins = len(masked_data)//100 if not np.isfinite(nbins) else nbins
+        nbins = 100
         plt.figure()
         plt.hist(masked_data,bins=int(nbins),color='k')
         plt.xlabel(label)
         plt.ylabel(r"$N_{\mathrm{bins}}$")
-        plt.xlim(median - 7 * standard_deviation, median + 7 * standard_deviation)
+        #plt.xlim(median - 7 * standard_deviation, median + 7 * standard_deviation)
 
         plt.savefig(hist_path, bbox_inches='tight')
         plt.close()
