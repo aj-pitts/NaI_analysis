@@ -118,7 +118,52 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
         file_handler.write_maps_file(galname, bin_method, [velocity_mapdict], verbose=verbose)
     else:
         return vmap_dict
+    
 
+def test_equal_n(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, verbose = False):
+    util.verbose_print(verbose, "Computing EW lims...")
+
+    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
+    local_file = datapath_dict['LOCAL']
+    hdul = fits.open(local_file)
+
+    spatial_bins = hdul['spatial_bins'].data.flatten()
+    unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
+
+    snr = hdul['nai_snr'].data.flatten()[bin_inds]
+    ew = hdul['ew_noem'].data.flatten()[bin_inds]
+    ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
+    velocity = vmap.flatten()[bin_inds]
+    if vmap_error.ndim == 3:
+        vmap_error = np.mean(vmap_error, axis=0)
+    velocity_error = vmap_error.flatten()[bin_inds]
+    
+
+    if vmap_mask is not None:
+        velocity_mask = vmap_mask.flatten()[bin_inds]
+        velocity_mask[velocity_mask==7] = 0
+        velocity_mask = velocity_mask.astype(bool)
+        datamask = np.logical_and(velocity_mask, ew_mask)
+    else:
+        datamask = ew_mask
+
+    threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+
+    data = {}
+    ew_lims = []
+
+    for (sn_low, sn_high) in threshold_dict['sn_lims']:
+        sn_low = int(sn_low) if np.isfinite(sn_low) else sn_low
+        sn_high = int(sn_high) if np.isfinite(sn_high) else sn_high
+
+        w = (snr > sn_low) & (snr <= sn_high) & (ew > 0)
+
+        mask = np.logical_and(w, ~datamask)
+        masked_ew = ew[mask]
+        masked_velocities = velocity[mask]
+        masked_errors = velocity_error[mask]
+
+        
 
 def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, verbose = False):
     util.verbose_print(verbose, "Computing EW lims...")
@@ -159,7 +204,7 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         key = f"{sn_low}-{sn_high}"
         data[key] = {}
 
-        w = (snr > sn_low) & (snr <= sn_high)
+        w = (snr > sn_low) & (snr <= sn_high) & (ew > 0)
 
         mask = np.logical_and(w, ~datamask)
         masked_ew = ew[mask]
@@ -201,7 +246,7 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
     
     file_handler.write_thresholds(galname, ew_lims=ew_lims, overwrite=True)
     util.verbose_print(verbose, "Done.")
-    inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, scatter_lim=scatter_lim, verbose=verbose)
+    inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
 
 
 

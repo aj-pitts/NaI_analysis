@@ -350,3 +350,54 @@ def mask_arrays(truth_array, *arrays):
             raise ValueError(f"Array {i} has length {len(arr)}, but truth_array has length {len(truth_array)}")
         
     return tuple(arr[truth_array] for arr in arrays)
+
+
+def extract_bin_values(bin_map, data_map, data_mask=None, exclude_unused=True):
+    """
+    Extract one value per unique bin.
+
+    Parameters
+    ----------
+    bin_map : 2D array
+        Map of bin IDs.
+    data_map : 2D array
+        Map of data values.
+    data_mask : 2D bool array, optional
+        Mask for data_map. True means masked (ignored).
+    exclude_unused : bool, optional
+        If True, excludes bin ID -1.
+
+    Returns
+    -------
+    bins : ndarray
+        Array of unique bin IDs.
+    values : ndarray
+        Array of one data value per bin.
+    """
+
+    bin_map = np.asarray(bin_map)
+    data_map = np.asarray(data_map)
+
+    if data_mask is None:
+        data_mask = np.zeros_like(bin_map, dtype=bool)
+    else:
+        data_mask = np.asarray(data_mask, dtype=bool)
+
+    # If excluding unused bins, also mask out bin -1
+    if exclude_unused:
+        data_mask = np.logical_or(data_mask, bin_map == -1)
+
+    # Create a flat mask of valid pixels
+    valid_pixels = ~data_mask
+
+    # Only consider valid pixels
+    valid_bins = bin_map[valid_pixels]
+    valid_data = data_map[valid_pixels]
+
+    # Get unique bins and first indices
+    unique_bins, unique_indices = np.unique(valid_bins, return_index=True)
+
+    # Pick one data value for each bin
+    bin_values = valid_data[unique_indices]
+
+    return unique_bins, bin_values

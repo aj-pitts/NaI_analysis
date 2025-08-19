@@ -69,8 +69,8 @@ def make_mcmc_results_cube(galname, bin_method, verbose=False, write_data=True):
 
         percentiles = mcmc_table[ind]['percentiles']
 
-        for i,cube in enumerate([results_cube, error_16th_percentile_cube, error_84th_percentile_cube]):
-            cube[:,y,x] = percentiles[:,i, np.newaxis]
+        for i,cube in enumerate([results_cube, error_84th_percentile_cube, error_16th_percentile_cube]):
+            cube[:,y,x] = percentiles[:,i,np.newaxis]
             
 
     mcmc_dict = {"MCMC Results":results_cube, "MCMC 16th Percentile":error_16th_percentile_cube, "MCMC 84th Percentile":error_84th_percentile_cube}

@@ -90,7 +90,10 @@ def get_hii_mapdict(galname, bin_method, placeholder=True, verbose=False):
             "AUTHOR":("Ryan Rickards Vaught","")
         }
     }  
-    hii_mapdict = {hdu_name:hiimap}
+    hii_dict = {hdu_name:hiimap}
+
+    ## TODO
+    hii_mapdict = file_handler.standard_map_dict(galname, hii_dict, custom_header_dict=hii_header_dict)
 
     return hii_mapdict, hii_header_dict
 

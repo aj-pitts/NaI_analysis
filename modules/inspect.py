@@ -5,11 +5,12 @@ from astropy.io import fits
 from glob import glob
 
 import argparse
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 
-from modules import defaults, file_handler
+from modules import defaults, file_handler, util
 from modules.util import verbose_print, verbose_warning, check_filepath
 
 import plotly.graph_objects as go
@@ -76,15 +77,20 @@ def threshold_bins(galname, bin_method, nbins = 10, verbose = False):
         inspect_bin_profiles(galname, bin_method, subdict['above']['bins'][:nbins], subdict['above']['snr'][:nbins], subdict['above']['ew'][:nbins], show = False, save = True, 
                              fname = f'{galname}-{bin_method}_{key}_goodbin_inspect.pdf', verbose=verbose)
 
+
+
 def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
-                         show = False, save = True, fname = None, verbose = False):
+                         show = False, save = True, fname = None, show_emline_masking = False, 
+                         show_samples = False, verbose = False):
     if len(bin_list) > 100:
         raise ValueError(f"Input of {len(bin_list)} bins too large. Recommended 100 or less bins at a time.")
     
-    if len(bin_list) != len(snrs):
-        raise ValueError(f"S/N array does not match Bin array")
-    if len(bin_list) != len(ews):
-        raise ValueError(f"EW array does not match Bin array")
+    if snrs is not None:
+        if len(bin_list) != len(snrs):
+            raise ValueError(f"S/N array does not match Bin array")
+    if ews is not None:
+        if len(bin_list) != len(ews):
+            raise ValueError(f"EW array does not match Bin array")
     
     verbose_print(f"Plotting line profiles for {len(bin_list)} bins...")
     plt.style.use(os.path.join(defaults.get_default_path('config'), 'figures.mplstyle'))
@@ -120,6 +126,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
     fig = plt.figure(figsize=(fig_width, fig_height))
     
     fontsize = max(15, fig.get_size_inches()[1])
+    text_size = fontsize//3
 
     total_subplots = len(bin_list)
     for i in range(total_subplots):
@@ -143,7 +150,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         restwave = wave / (1 + z)
         flux_1D = flux[:, y, x]
         model_1D = stellar_cont[:, y, x]
-        #ivar_1D = ivar[:, y, x]
+        nflux = flux_1D / model_1D
 
         wave_window = (restwave >= NaD_window[0]) & (restwave <= NaD_window[1])
         inds = np.where(wave_window)
@@ -155,23 +162,44 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
 
         ax1 = fig.add_subplot(gs[0])
 
-        ax1.plot(restwave[inds], flux_1D[inds] / model_1D[inds], 'k', drawstyle='steps-mid')
-        ax1.hlines([1], xmin=NaD_window[0], xmax=NaD_window[1], colors='k', alpha=0.4, linewidths=0.5, linestyles='dashed')
+        ax1.plot(restwave[inds], nflux[inds], 'k', drawstyle='steps-mid')
+        if show_emline_masking:
+            s=1
+            blim = [5850.0, 5870.0]
+            rlim = [5910.0, 5930.0]
+            bind = np.where((restwave > blim[0]) & (restwave < blim[1]))
+            rind = np.where((restwave > rlim[0]) & (restwave < rlim[1]))
+
+            continuum = np.concatenate((nflux[bind], nflux[rind]))
+            med = np.median(continuum)
+            std = np.std(continuum)
+            continuum_mask = (continuum < med + s * std) & (continuum > med - s * std)
+
+            median = np.median(continuum[continuum_mask])
+            standard_dev = np.std(continuum[continuum_mask])
+
+            wave_window = (restwave >= NaD_window[0]) & (restwave <= NaD_window[1])
+            inds = np.where(wave_window)
+
+            mask = nflux[inds] > median + s * standard_dev
+            ax1.scatter(restwave[inds][mask], nflux[inds][mask], c='r', marker='x', s=20)
+
+        #ax1.hlines([1], xmin=NaD_window[0], xmax=NaD_window[1], colors='k', alpha=0.4, linewidths=0.5, linestyles='dashed')
 
         #ax.set_title(f"Bin {Bin}")
-        ax1.text(.075,.85, f"Bin {Bin}", transform=ax1.transAxes)
-        ax1.text(.925,.725, rf"$S/N = {sn:.0f}$", transform=ax1.transAxes, ha='right')
-        ax1.text(.925,.85, rf"$\mathrm{{EW}} = {ew:.4f}\ \mathrm{{\AA}}$", transform=ax1.transAxes, ha='right')
+        ax1.text(.075,.85, f"Bin {Bin}", transform=ax1.transAxes, fontsize=text_size)
+        ax1.text(.925,.725, rf"$S/N = {sn:.0f}$", transform=ax1.transAxes, ha='right', fontsize=text_size)
+        ax1.text(.925,.85, rf"$\mathrm{{EW}} = {ew:.4f}\ \mathrm{{\AA}}$", transform=ax1.transAxes, ha='right', fontsize=text_size)
 
         lambda_0 = mcmc_cube[0, y, x]
         lambda_16 = mcmc_16[0, y, x]
         lambda_84 = mcmc_84[0, y, x]
 
         ax1.fill_between([lambda_0-lambda_16, lambda_0+lambda_84], [-20, -20], [20, 20], color='r',
-                        alpha=0.3)
-        ax1.vlines([lambda_0], -20, 20, colors = 'black', linestyles = 'dashed', linewidths = 1)
+                        alpha=0.1)
+        ax1.vlines([lambda_0], -20, 20, colors = 'black', linestyles = 'dashed', linewidths = 2)
 
-        ax1.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
+        #ax1.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
         
         ax1.set_ylim(.75, 1.2)
         ax1.set_xlim(NaD_window[0], NaD_window[1])
@@ -187,7 +215,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
 
         ax2.plot(restwave[inds], flux_1D[inds] / med_flux, 'dimgray', drawstyle = 'steps-mid', lw=1.4)
         ax2.plot(restwave[inds], model_1D[inds] / med_flux, 'tab:blue', drawstyle = 'steps-mid', lw=1.1)
-        ax2.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
+        #ax2.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
         
         ax2.set_ylim(.65, 1.2)
         ax2.set_xlim(NaD_window[0], NaD_window[1])
@@ -206,10 +234,13 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
             if row_idx == nrow - 2 and col_idx >= last_row_cols:
                 ax2.set_xticklabels([])
 
-    fig.text(0.5, 0.05, r'Wavelength $\left( \mathrm{\AA} \right)$', ha='center', va='center', fontsize=fontsize)
+    #fig.text(0.5, 0.05, r'Wavelength $\left( \mathrm{\AA} \right)$', ha='center', va='center', fontsize=fontsize)
+    fig.supxlabel(r'Wavelength $\left( \mathrm{\AA} \right)$', fontsize=fontsize)
     # fig.text(0.05, 0.5, r'Flux (top: Normalized, Bottom: $\left[ \mathrm{1E-17\ erg\ s^{-1}\ cm^{-2}\ \AA^{-1}\ spaxel^{-1}} \right]$)',
     #          rotation='vertical',ha='center',va='center', fontsize=fontsize)
-    fig.text(0.05, 0.5, r'Normalized Flux', rotation='vertical',ha='center',va='center', fontsize=fontsize)
+
+    #fig.text(0.05, 0.5, r'Normalized Flux', rotation='vertical',ha='center',va='center', fontsize=fontsize)
+    fig.supylabel(r'Normalized Flux', fontsize=fontsize)
     #fig.text(0.06, 0.5, r'top: Normalized', rotation='vertical',ha='center',va='center', fontsize=fontsize)
     #fig.text(0.07, 0.5, r'bottom: $\mathrm{1E-17\ erg\ s^{-1}\ cm^{-2}\ \AA^{-1}\ spaxel^{-1}}$', rotation='vertical',ha='center',va='center', fontsize=fontsize)
 
@@ -232,6 +263,57 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
     else:
         plt.close()
 
+def get_corner_plots(galname, bin_method, bin_list, show = False, save = True, verbose = False):
+    from mcmc_results import sort_paths
+    from astropy.table import Table
+    import corner
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    mcmc_files = datapath_dict['MCMC']
+
+    sorted_paths = sort_paths(mcmc_files)
+
+    for binID in bin_list:
+        verbose_print(verbose, f"Obtaining samples for bin {binID}")
+        for mcmc_fil in sorted_paths:
+            path, file = os.path.split(mcmc_fil)
+            match = re.search(r'binid-(\d+)-(\d+)-samples', file)
+
+            if match:
+                start_ID = int(match.group(1))
+                end_ID = int(match.group(2))
+
+                if start_ID <= binID <= end_ID:
+                    verbose_print(verbose, f"    File found {file}")
+                    data = fits.open(mcmc_fil)
+                    data_table = Table(data[1].data)
+
+                    all_bins = data_table['bin'].data
+
+                    i = np.where(binID == all_bins)[0][0]
+                    samples = data_table[i]['samples']
+                    flat_samples = samples[:,1000:,:].reshape(-1, 4)
+                    labels = [r'$\lambda$', r'$\mathrm{log}N$', r'$b_D$', r'$C_f$']
+                    ##updated4
+                    fig = corner.corner(
+                            flat_samples,
+                            labels=labels,
+                            show_titles=True,
+                            title_fmt=".2f",
+                            quantiles=[0.16, 0.5, 0.84],
+                            title_kwargs={"fontsize": 12},
+                    )
+                    fig.suptitle(f"Bin {binID}", fontsize=20)
+                    if save:
+                        output_dir = defaults.get_fig_paths(galname, bin_method, subdir = 'inspection')
+                        fname = f"Samples_corner_bin_{binID}.pdf"
+                        figpath = os.path.join(output_dir, fname)
+                        plt.savefig(figpath, bbox_inches='tight')
+                        verbose_print(verbose, f"   Figure saved to {figpath}\n")
+                        plt.close()
+                    break
+        else:
+            print(f'No file found for bin {binID}\n')
+
 
 def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_mask = None, 
                     ewnoem = False, scatter_lim = 30, fig_save_dir = None, verbose=False):
@@ -240,6 +322,7 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_
     plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
 
     outpath = defaults.get_fig_paths(galname, bin_method, 'inspection') if fig_save_dir is None else fig_save_dir
+    util.check_filepath(outpath,mkdir=True,verbose=verbose)
 
     file_end = '_maskedem' if ewnoem else ''
     out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_scatter{file_end}.pdf')
@@ -296,7 +379,10 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_
         ax1.grid(visible=True, linewidth=0.5, zorder=0)
 
         ax1.set_ylim(-750, 750)
-        ax1.set_xlim(-1, 3)
+        if ewnoem:
+            ax1.set_xlim(0,3)
+        else:
+            ax1.set_xlim(-1, 3)
         ax1.set_xticklabels([])
         ax1.tick_params(labelsize=12)
 
@@ -313,7 +399,10 @@ def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_
         ax2.hlines([scatter_lim], -10, 10, colors='k', linestyles='dashed', linewidths = 1)
 
         ax2.set_ylim(0, 1000)
-        ax2.set_xlim(-1, 3)
+        if ewnoem:
+            ax2.set_xlim(0,3)
+        else:
+            ax2.set_xlim(-1, 3)
         ax2.tick_params(labelsize=12)
 
         ax2.set_ylabel(r'$\mathrm{med}\ \sigma_{v_{\mathrm{cen}}}$', fontsize=14)
@@ -506,6 +595,22 @@ def inspect_vel_ew(galname, bin_method, contour = True, fig_save_dir = None,
             
         pio.write_image(fig, out_file_plotly) 
         verbose_print(verbose, f"Contour plot saved to {out_file_plotly}")
+
+def inspect_ew_vs_ewnoem(galname, bin_method, verbose = False):
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    local = fits.open(datapath_dict['LOCAL'])
+
+    spatial_bins = local['spatial_bins'].data
+    unique_bins, unique_inds = np.unique(spatial_bins, return_index=True)
+
+    ew = local['ew_nai'].data
+    ew_mask = local['ew_nai_mask'].data.astype(bool)
+
+    ew_noem = local['ew_noem'].data
+    ew_noem_mask = local['ew_noem_mask'].data.astype(bool)
+
+    datamask = np.logical_or(ew_mask, ew_noem_mask)
+
 
 def inspect_v_vs_r(galname, bin_method, verbose = False):
 

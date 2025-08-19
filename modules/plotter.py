@@ -56,6 +56,7 @@ def map_plotter(galname, bin_method, image, fig_keyword, save_path, label, units
                 mask = None, mask_ignore_list = None, minmax = False, histogram = True, verbose = True):
     
     image_name = f'{galname}-{bin_method}-{fig_keyword}.pdf'
+    util.check_filepath(save_path,mkdir=True,verbose=verbose)
     fig_path = os.path.join(save_path, image_name)
 
     plt.style.use(defaults.matplotlib_rc())

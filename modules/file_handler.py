@@ -148,7 +148,7 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
             # Find the subdirectory with the most recent date
             if dated_dirs:
                 most_recent_dir = max(dated_dirs, key=lambda x: x[1])
-                print("Most recent subdirectory:", most_recent_dir[0])
+                verbose_print(verbose, "Most recent subdirectory:", most_recent_dir[0])
                 mcmc_rundir = os.path.join(mcmcpath, most_recent_dir[0])
                 mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
                 verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
@@ -490,6 +490,8 @@ def write_maps_file(
     analysis_plan = defaults.analysis_plans()
     local_data = defaults.get_data_path(subdir='local')
     filepath = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plan)
+    util.check_filepath(filepath, mkdir=True,verbose=verbose)
+
     file_name = f"{galdir}-local_maps.fits"
     full_path = os.path.join(filepath, file_name)
 
@@ -556,7 +558,8 @@ def reorder_hdu(hdul):
         'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
         'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
         'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCMC_84TH_PERC',
-        'HII'
+        'HII',
+        'BPT'
     ]
     primary_hdu = hdul[0]
     sorted_hdus = [primary_hdu]

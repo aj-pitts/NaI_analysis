@@ -186,8 +186,10 @@ def plot_dap_maps(galname: str, bin_method: str, output_dir = None, verbose = Fa
             ax.set_yticklabels([])
 
     # Axis labels for the whole figure
-    fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
-    fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
+    # fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
+    # fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
+    fig.supxlabel(r'$\Delta \alpha$ (arcsec)', fontsize=20)
+    fig.supylabel(r'$\Delta \delta$ (arcsec)', fontsize=20)    
 
     if output_dir is None:
         output_dir = defaults.get_fig_paths(galname, bin_method, subdir='dap')
@@ -238,7 +240,7 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = 
     if mask:
         #snr_mask = hdul['nai_snr_mask'].data.astype(bool)
         snr_mask = snr <= 0
-        ew_mask = hdul['ew_nai_mask'].data[1].astype(bool)
+        ew_mask = hdul['ew_noem_mask'].data.astype(bool)
         sfrsd_mask = hdul['sfrsd_mask'].data.astype(bool)
         v_mask = hdul['v_nai_mask'].data.astype(bool)
     else:
@@ -255,17 +257,11 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = 
     # cf = mcmc[3]
 
     plotdicts = {
-        #'Z':dict(image = z, cmap = 'coolwarm', vmin = None, vmax = None, v_str = r'$z$'),
         'SNR':dict(image = snr, mask = snr_mask, cmap = 'managua', vmin = 0, vmax = 100, v_str = r'$S/N_{\mathrm{Na\ D}}$'),
         'EW':dict(image = ew, mask = ew_mask, cmap = 'rainbow', vmin=-0.2, vmax=2, v_str = r'$\mathrm{EW_{Na\ D}}\ \left( \mathrm{\AA} \right)$'),
 
         'SFRSD':dict(image = sfrsd, mask = sfrsd_mask, cmap = 'rainbow', vmin=-2.5, vmax=0, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$'),
         'V_BULK':dict(image = v_bulk, mask = v_mask, cmap = 'seismic', vmin = -250, vmax = 250, v_str = r'$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
-        #'V_FRAC':dict(image = v_frac, cmap = 'Spectral', vmin = -1, vmax = 1, v_str = r'$v_{\mathrm{flow}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
-
-        #'logN':dict(image = logn, cmap = 'pink', vmin = 13, vmax = 16.5, v_str = r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$'),
-        #'Cf':dict(image = cf, cmap = 'pink', vmin = 0, vmax = 1, v_str = r'$C_f$'),
-        #'bD':dict(image = bd, cmap = 'pink', vmin = 2, vmax = 100, v_str = r'$b_D \left( \mathrm{km\ s^{-1}} \right)$')
     }
     
     alphabet = list(string.ascii_lowercase)
@@ -325,8 +321,10 @@ def plot_local_grid(galname: str, bin_method: str, local_maps_path: str, mask = 
             ax.set_yticklabels([])
 
     # Axis labels for the whole figure
-    fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
-    fig.text(0.11, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
+    #fig.text(0.5, 0.05, r'$\Delta \alpha$ (arcsec)', ha='center', va='center', fontsize=20)
+    #fig.text(0.07, 0.5, r'$\Delta \delta$ (arcsec)', ha='center', va='center', rotation='vertical', fontsize=20)
+    fig.supxlabel(r'$\Delta \alpha$ (arcsec)', fontsize=20)
+    fig.supylabel(r'$\Delta \delta$ (arcsec)', fontsize=20)
 
     # Save output
     if output_dir is None:
@@ -517,7 +515,7 @@ def terminal_velocity(galname, bin_method, local_maps_path, output_dir = None, r
     radius_map = hdul['RADIUS'].data
 
     sfrmap = hdul['SFRSD'].data
-    sfrmap_mask = hdul['SFRSD_MASk'].data
+    sfrmap_mask = hdul['SFRSD_MASK'].data
     sfrmap_error = hdul['SFRSD_ERROR'].data
 
     vterm = hdul['V_MAX_OUT'].data
@@ -576,7 +574,7 @@ def terminal_velocity(galname, bin_method, local_maps_path, output_dir = None, r
         #plt.errorbar(sfr, tv, xerr=None, yerr=tv_err, color = c, **style)
         sc = ax.scatter(sfr, tv, marker='o', s = 12, color=c, ec='k', lw=.75)
 
-    x_pos = 0.1
+    x_pos = 0.01
     y_pos = 0.1
     x_pos_data, y_pos_data = ax.transData.inverted().transform(ax.transAxes.transform((x_pos, y_pos)))
     ax.errorbar(x_pos_data, y_pos_data, yerr=np.mean(terminal_velocity_errors), fmt='none', color='black', capsize=3, elinewidth=1.5)
@@ -596,7 +594,8 @@ def terminal_velocity(galname, bin_method, local_maps_path, output_dir = None, r
         modv = wind_model(modsfr, popt[0], popt[1])
 
         #model_label = rf'$v = {popt[0]:.0f}\ \left( \Sigma_{{\mathrm{{SFR}}}} \right)^{{{popt[1]:.2f}}}$'
-        model_label = rf'$v \propto \Sigma_{{\mathrm{{SFR}}}} ^{{{popt[1]:.2f}}}$'
+        model_label = rf'$v \propto \Sigma_{{\mathrm{{SFR}}}} ^{{{popt[1]:.2f} \pm {np.sqrt(pcov[1,1]):.2f}}}$'
+        #model_label = rf'$\alpha = {popt[1]:.2f} \pm {np.sqrt(pcov[1,1]):.2f}$'
         ax.plot(np.log10(modsfr), modv, 'dimgray', linestyle='dashed', 
                 label=model_label)
 
@@ -635,6 +634,8 @@ def main(args):
     local_data = defaults.get_data_path(subdir='local')
     local_outputs = os.path.join(local_data, 'local_outputs', f"{galname}-{bin_method}", corr_key, analysis_plans)
     local_maps_path = os.path.join(local_outputs, f"{galname}-{bin_method}-local_maps.fits")
+    mplconfig = os.path.join(defaults.get_default_path('config'), 'figures.mplstyle')
+    plt.style.use(mplconfig)
 
     verbose_print(verbose, f"Creating Plots for {galname}-{bin_method}")
     
