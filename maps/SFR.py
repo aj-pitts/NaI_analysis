@@ -72,7 +72,7 @@ def correct_dust(F_Ha, F_Hb, HaHb_ratio = 2.87, Rv = 3.1, k_Ha = 2.45, k_Hb = 3.
     F_corr[w] = F_Ha[w] * (10 ** power[w])
     F_corr[~w] = np.nan
 
-    return F_corr
+    return {'H_alpha':F_corr, 'E_BV':E_BV}
 
 
 def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mpc, c = 2.998e5 * u.km / u.s):
@@ -234,6 +234,7 @@ def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data
     SFRSD_sigma = np.zeros(spatial_bins.shape) - 999.0
     SFRSD_mask = np.zeros(spatial_bins.shape)
 
+
     # slice values for H alpha and H beta
     ha = flux[23]
     ha_err = 1/np.sqrt(ivar[23])
@@ -244,7 +245,9 @@ def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data
     hb_mask = mask[14]
 
     # correct the entire flux map
-    ha_flux_corr = correct_dust(ha, hb)
+    dust_corrections = correct_dust(ha, hb)
+    ha_flux_corr = dust_corrections['H_alpha']
+    extinction_map = dust_corrections['E_BV']
     
     ## mask unused spaxels
     w = spatial_bins == -1
@@ -277,6 +280,20 @@ def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data
     if write_data:
         sfr_mapdict = file_handler.standard_map_dict(galname, SFR_dict, HDU_keyword="SFRSD", IMAGE_units=r"$\left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$")
         file_handler.write_maps_file(galname, bin_method, [sfr_mapdict], verbose=verbose, preserve_standard_order=True)
+
+        extinction_dict = {"E_BV":extinction_map}
+        name = "E(B-V)"
+        extinction_header = {
+            name:{
+                "DESC":(f"{galname} dust extinction",""),
+                "HDUCLASS":("MAP", "Data format"),
+                "UNITS":("", "Unit of pixel values"),
+                "EXTNAME":(name, "Extension name"),
+                "AUTHOR":("Andrew Pitts","")
+            }
+        }
+        extinction_mapdict = file_handler.standard_map_dict(galname, extinction_dict, custom_header_dict=extinction_header)
+        file_handler.write_maps_file(galname, bin_method, [extinction_mapdict], verbose=verbose)
     else:
         return SFR_dict
 
