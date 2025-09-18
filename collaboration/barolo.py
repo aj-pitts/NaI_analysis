@@ -15,7 +15,7 @@ def get_args():
 
     return parser.parse_args()
 
-def make_ha_cube(galname, bin_method, verbose=False):
+def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
     redshift = datapath_dict['Z']
     mapfile = datapath_dict['MAPS']
@@ -55,15 +55,29 @@ def make_ha_cube(galname, bin_method, verbose=False):
     i1, i2 = np.argmin(abs(restframe - (halpha - disp_lambda))), np.argmin(abs(restframe - (halpha + disp_lambda)))
     
     flux_cube = data['data'].data
-    ivar_cube = data['stat'].data
-
     sliced_flux = flux_cube[i1:i2,:,:]
-    sliced_ivar = ivar_cube[i1:i2,:,:]
-    
-    fluxhdu = fits.ImageHDU(data = sliced_flux, name='FLUX')
-    ivarhdu = fits.ImageHDU(data = sliced_ivar, name='IVAR')
 
-    hdul = fits.HDUList([fits.PrimaryHDU(), fluxhdu, ivarhdu])
+    new_header = header.copy()
+    new_header['NAXIS3'] = i2 - i1
+    new_header['CRVAL3'] = wavelengths[i1]
+    new_header['CRPIX3'] = 1
+    new_header['OBJECT'] = galname
+    new_header['EXTNAME'] = 'PRIMARY'
+    new_header.add_comment(f'H-alpha cube sliced around {halpha:.1f} angstrom rest-frame')
+    new_header.add_comment(f'Velocity dispersion: {v_disp:.1f} km/s')
+    new_header.add_comment(f'Redshift: {redshift:.6f}')
+
+    if not primary_only:
+        raise ValueError("flux and ivar HDUList not currently supported in barolo.py")
+        ivar_cube = data['stat'].data
+        sliced_ivar = ivar_cube[i1:i2,:,:]
+        ivarhdu = fits.ImageHDU(data = sliced_ivar, name='IVAR')
+        fluxhdu = fits.ImageHDU(data = sliced_flux, name='FLUX')
+
+        hdul = fits.HDUList([fits.PrimaryHDU(), fluxhdu, ivarhdu])
+    else:
+        hdul = fits.PrimaryHDU(data=sliced_flux, header=new_header)
+
     
     local_data_path = defaults.get_data_path('local')
     barolo_path = os.path.join(local_data_path, '3dbarolo')
