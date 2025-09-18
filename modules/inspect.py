@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib import gridspec
 
 from modules import defaults, file_handler, util
-from modules.util import verbose_print, verbose_warning, check_filepath
+from modules.util import verbose_print, sys_warnings, check_filepath
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -252,7 +252,7 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         else:
             root, ext = os.path.splitext(fname)
             if ext != '.pdf':
-                verbose_warning(verbose, f"Filename extension of {ext} invalid. Defaulting to PDF")
+                sys_warnings(f"Filename extension of {ext} invalid. Defaulting to PDF", verbose)
                 fname = root+'.pdf'
 
         figpath = os.path.join(output_dir, fname)
@@ -262,57 +262,6 @@ def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
         plt.show()
     else:
         plt.close()
-
-def get_corner_plots(galname, bin_method, bin_list, show = False, save = True, verbose = False):
-    from mcmc_results import sort_paths
-    from astropy.table import Table
-    import corner
-    datapath_dict = file_handler.init_datapaths(galname, bin_method)
-    mcmc_files = datapath_dict['MCMC']
-
-    sorted_paths = sort_paths(mcmc_files)
-
-    for binID in bin_list:
-        verbose_print(verbose, f"Obtaining samples for bin {binID}")
-        for mcmc_fil in sorted_paths:
-            path, file = os.path.split(mcmc_fil)
-            match = re.search(r'binid-(\d+)-(\d+)-samples', file)
-
-            if match:
-                start_ID = int(match.group(1))
-                end_ID = int(match.group(2))
-
-                if start_ID <= binID <= end_ID:
-                    verbose_print(verbose, f"    File found {file}")
-                    data = fits.open(mcmc_fil)
-                    data_table = Table(data[1].data)
-
-                    all_bins = data_table['bin'].data
-
-                    i = np.where(binID == all_bins)[0][0]
-                    samples = data_table[i]['samples']
-                    flat_samples = samples[:,1000:,:].reshape(-1, 4)
-                    labels = [r'$\lambda$', r'$\mathrm{log}N$', r'$b_D$', r'$C_f$']
-                    ##updated4
-                    fig = corner.corner(
-                            flat_samples,
-                            labels=labels,
-                            show_titles=True,
-                            title_fmt=".2f",
-                            quantiles=[0.16, 0.5, 0.84],
-                            title_kwargs={"fontsize": 12},
-                    )
-                    fig.suptitle(f"Bin {binID}", fontsize=20)
-                    if save:
-                        output_dir = defaults.get_fig_paths(galname, bin_method, subdir = 'inspection')
-                        fname = f"Samples_corner_bin_{binID}.pdf"
-                        figpath = os.path.join(output_dir, fname)
-                        plt.savefig(figpath, bbox_inches='tight')
-                        verbose_print(verbose, f"   Figure saved to {figpath}\n")
-                        plt.close()
-                    break
-        else:
-            print(f'No file found for bin {binID}\n')
 
 
 def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_mask = None, 
@@ -610,12 +559,6 @@ def inspect_ew_vs_ewnoem(galname, bin_method, verbose = False):
     ew_noem_mask = local['ew_noem_mask'].data.astype(bool)
 
     datamask = np.logical_or(ew_mask, ew_noem_mask)
-
-
-def inspect_v_vs_r(galname, bin_method, verbose = False):
-
-    return
-
 
 def get_args():
     parser = argparse.ArgumentParser(description="A script to create/overwrite plots without rerunning analyze_NaI")
