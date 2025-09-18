@@ -9,7 +9,7 @@ import modules.util as util
 import warnings
 import configparser
 from datetime import datetime
-from modules.util import verbose_print
+from modules import util
 from tqdm import tqdm
 import yaml
 
@@ -60,7 +60,7 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
         **Note**: If a file does not exist, its value in the dictionary will be `None`.
     """
 
-    verbose_print(verbose, f"Acquiring relevant files for {galname}-{bin_method}")
+    util.verbose_print(verbose, f"Acquiring relevant files for {galname}-{bin_method}")
     ## initialize paths to the data directory and relevant subdirectories
     pipeline_data = defaults.get_data_path(subdir='pipeline')
     local_data = defaults.get_data_path(subdir='local')
@@ -86,51 +86,51 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
     ### CONFIG file
     configfils = glob(os.path.join(musecubepath, "*.ini"))
     if len(configfils) == 0:
-        util.verbose_warning(verbose,f"No configuration file found in {musecubepath}")
+        util.sys_warnings(f"No configuration file found in {musecubepath}", verbose)
 
     else:
         if len(configfils)>1:
-            warnings.warn(f"{musecubepath} has more than one config file:\n{configfils} \nDefaulting to {configfils[0]}")
+            util.sys_warnings(f"{musecubepath} has more than one config file:\n{configfils} \nDefaulting to {configfils[0]}")
 
         outdict['CONFIG'] = configfils[0]
-        verbose_print(verbose, f"'CONFIG' key: {configfils[0]}")
+        util.verbose_print(verbose, f"'CONFIG' key: {configfils[0]}")
         
     if redshift:
         configuration = parse_config(configfils[0], verbose=verbose)
         redshift = configuration['z']
         outdict['Z'] = float(redshift)
-        #verbose_print(verbose, f"Redshift z = {redshift} found in {configfils[0]}")
-        verbose_print(verbose, f"'Z' key: {redshift}")
+        #util.verbose_print(verbose, f"Redshift z = {redshift} found in {configfils[0]}")
+        util.verbose_print(verbose, f"'Z' key: {redshift}")
 
     ### DAP files
     if not os.path.exists(dappath):
-        util.verbose_warning(verbose,f"Filepath does not exist: {dappath}")
+        util.sys_warnings(f"Filepath does not exist: {dappath}", verbose)
     else:
         beta_corr_fils = glob(os.path.join(dappath, "**", "*.fits"), recursive=True)
         if len(beta_corr_fils) != 0:
             for fil in beta_corr_fils:
                 if 'LOGCUBE' in fil:
                     outdict['LOGCUBE'] = fil
-                    verbose_print(verbose, f"'LOGCUBE' key: {fil}")
+                    util.verbose_print(verbose, f"'LOGCUBE' key: {fil}")
                 if 'MAPS' in fil:
                     outdict['MAPS'] = fil
-                    verbose_print(verbose, f"'MAPS' key: {fil}")
+                    util.verbose_print(verbose, f"'MAPS' key: {fil}")
         else:
-            util.verbose_warning(verbose, f"No LOGCUBE or MAPS found in {dappath}")
+            util.sys_warnings(f"No LOGCUBE or MAPS found in {dappath}", verbose)
 
 
     ### MCMC files
     if not os.path.exists(mcmcpath):
-        util.verbose_warning(verbose,f"Filepath does not exist: {mcmcpath}")
+        util.sys_warnings(f"Filepath does not exist: {mcmcpath}", verbose)
     else:
         mcmc_subdirs = [d for d in os.listdir(mcmcpath) if os.path.isdir(os.path.join(mcmcpath, d))]
         if len(mcmc_subdirs)==0:
-            util.verbose_warning(verbose, f"Empty directory: {mcmcpath}")
+            util.sys_warnings(f"Empty directory: {mcmcpath}", verbose)
         
         elif len(mcmc_subdirs)==1:
             mcmc_rundir = os.path.join(mcmcpath, mcmc_subdirs[0])
             mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
-            verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
+            util.verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
 
         else:
             dated_dirs = []
@@ -148,10 +148,10 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
             # Find the subdirectory with the most recent date
             if dated_dirs:
                 most_recent_dir = max(dated_dirs, key=lambda x: x[1])
-                verbose_print(verbose, "Most recent subdirectory:", most_recent_dir[0])
+                util.verbose_print(verbose, "Most recent subdirectory:", most_recent_dir[0])
                 mcmc_rundir = os.path.join(mcmcpath, most_recent_dir[0])
                 mcmc_files = glob(os.path.join(mcmc_rundir, "*.fits"))
-                verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
+                util.verbose_print(verbose, f"'MCMC' key: {len(mcmc_files)} MCMC Files found in {mcmc_rundir}")
             else:
                 print("No valid 'Run_YYYY-MM-DD' subdirectories found.")
 
@@ -161,29 +161,29 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
 
     ### LOCAL file
     if not os.path.exists(localdatapath):
-        util.verbose_warning(verbose,f"Filepath does not exist: {localdatapath}")
+        util.sys_warnings(f"Filepath does not exist: {localdatapath}", verbose)
     else:
         localfils = glob(os.path.join(localdatapath, "*.fits"))
         if len(localfils) == 0:
-            util.verbose_warning(verbose,f"No local data file found in {localdatapath}")
+            util.sys_warnings(f"No local data file found in {localdatapath}", verbose)
         else:
             for file in localfils:
                 if "local_maps" in file:
                     outdict['LOCAL'] = file
-                    verbose_print(verbose, f"Using LOCAL File: {file}")
+                    util.verbose_print(verbose, f"Using LOCAL File: {file}")
         if outdict['LOCAL'] is None:
-            util.verbose_warning(verbose, f"*local_maps.fits file not found in {localdatapath}")
+            util.sys_warnings(f"*local_maps.fits file not found in {localdatapath}", verbose)
 
     ### individual local maps
     if not os.path.exists(localdatasubpath):
-        util.verbose_warning(verbose,f"Filepath does not exist: {localdatasubpath}")
+        util.sys_warnings(f"Filepath does not exist: {localdatasubpath}", verbose)
     else:
         localfils = glob(os.path.join(localdatasubpath, "*.fits"))
         if len(localfils) == 0:
-            util.verbose_warning(verbose,f"No map files in {localdatasubpath}")
+            util.sys_warnings(f"No map files in {localdatasubpath}", verbose)
         else:
             outdict['LOCAL_MAPS'] = localfils
-            verbose_print(f"'LOCAL' key: {len(localfils)} local maps found in {localdatasubpath}")
+            util.verbose_print(f"'LOCAL' key: {len(localfils)} local maps found in {localdatasubpath}")
 
     return outdict
 
@@ -619,8 +619,8 @@ def parse_config(config_fil, verbose):
             config.read(config_fil)
             parsing = False
         except configparser.Error as e:
-            verbose_print(verbose, f"Error parsing file: {e}")
-            verbose_print(verbose, f"Cleaning {config_fil}")
+            util.verbose_print(verbose, f"Error parsing file: {e}")
+            util.verbose_print(verbose, f"Cleaning {config_fil}")
             clean_ini_file(config_fil, overwrite=True)
 
 
@@ -681,8 +681,8 @@ def threshold_parser(galname, bin_method, require_ew=True):
     try:
         snr_edges = thresholds_file['snr_bins'][bin_method]
     except KeyError:
-        print(f"Binning method '{bin_method}' not found in SNR bins.")
-        return None
+        util.sys_warnings(f"Binning method '{bin_method}' not found in SNR bins...\nUsing SNR bins for SQUARE0.6")
+        snr_edges = thresholds_file['snr_bins']['SQUARE0.6']
 
     # Convert edges to floats
     snr_edges = [float('inf') if s == 'inf' else float(s) for s in snr_edges]
@@ -695,7 +695,7 @@ def threshold_parser(galname, bin_method, require_ew=True):
     ew_raw = ew_thresholds.get(galname, None)
     if ew_raw is None:
         if require_ew:
-            print(f"No EW thresholds found for galaxy '{galname}'.")
+            util.sys_warnings(f"No EW thresholds found for galaxy '{galname}'.")
             return None
         else:
             return {
@@ -733,7 +733,7 @@ def write_thresholds(galname, ew_lims, overwrite=True, verbose=False):
         if not overwrite:
             print(f"{galname} already has EW lims of {data['ew_thresholds'][galname]}")
         else:
-            verbose_print(verbose, f"Overwriting thresholds for {galname}")
+            util.verbose_print(verbose, f"Overwriting thresholds for {galname}")
             data["ew_thresholds"][galname] = ew_lims
 
     with open(thresholds_path, "w") as f:
