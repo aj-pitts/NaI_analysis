@@ -83,11 +83,13 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
 
         if not np.isfinite(velocity_err_upper) or not np.isfinite(velocity_err_lower):
             vmap_mask[w] = 5
-            velocity_err_upper = -999
-            velocity_err_lower = -999
+            velocity = -999
 
         if velocity == 0 or velocity == -999:
             frac = 0
+            velocity_err_upper = -999
+            velocity_err_lower = -999
+
         else:
             frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity > 0 else np.sum(lambda_samples < lamrest)/lambda_samples.size
 
@@ -118,54 +120,10 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
         file_handler.write_maps_file(galname, bin_method, [velocity_mapdict], verbose=verbose)
     else:
         return vmap_dict
-    
-
-def test_equal_n(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, verbose = False):
-    util.verbose_print(verbose, "Computing EW lims...")
-
-    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
-    local_file = datapath_dict['LOCAL']
-    hdul = fits.open(local_file)
-
-    spatial_bins = hdul['spatial_bins'].data.flatten()
-    unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
-
-    snr = hdul['nai_snr'].data.flatten()[bin_inds]
-    ew = hdul['ew_noem'].data.flatten()[bin_inds]
-    ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
-    velocity = vmap.flatten()[bin_inds]
-    if vmap_error.ndim == 3:
-        vmap_error = np.mean(vmap_error, axis=0)
-    velocity_error = vmap_error.flatten()[bin_inds]
-    
-
-    if vmap_mask is not None:
-        velocity_mask = vmap_mask.flatten()[bin_inds]
-        velocity_mask[velocity_mask==7] = 0
-        velocity_mask = velocity_mask.astype(bool)
-        datamask = np.logical_and(velocity_mask, ew_mask)
-    else:
-        datamask = ew_mask
-
-    threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
-
-    data = {}
-    ew_lims = []
-
-    for (sn_low, sn_high) in threshold_dict['sn_lims']:
-        sn_low = int(sn_low) if np.isfinite(sn_low) else sn_low
-        sn_high = int(sn_high) if np.isfinite(sn_high) else sn_high
-
-        w = (snr > sn_low) & (snr <= sn_high) & (ew > 0)
-
-        mask = np.logical_and(w, ~datamask)
-        masked_ew = ew[mask]
-        masked_velocities = velocity[mask]
-        masked_errors = velocity_error[mask]
 
         
 
-def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, verbose = False):
+def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, equal_N = False, verbose = False):
     util.verbose_print(verbose, "Computing EW lims...")
 
     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
@@ -180,7 +138,7 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
     ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
     velocity = vmap.flatten()[bin_inds]
     if vmap_error.ndim == 3:
-        vmap_error = np.mean(vmap_error, axis=0)
+        vmap_error = np.mean(abs(vmap_error), axis=0)
     velocity_error = vmap_error.flatten()[bin_inds]
     
 
@@ -188,10 +146,11 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         velocity_mask = vmap_mask.flatten()[bin_inds]
         velocity_mask[velocity_mask==7] = 0
         velocity_mask = velocity_mask.astype(bool)
-        datamask = np.logical_and(velocity_mask, ew_mask)
+        datamask = np.logical_or(velocity_mask, ew_mask)
     else:
         datamask = ew_mask
 
+    datamask = np.logical_or(datamask, velocity_error == 0)
     threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
 
     data = {}
@@ -210,26 +169,54 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         masked_ew = ew[mask]
         masked_velocities = velocity[mask]
         masked_errors = velocity_error[mask]
+        
+        if not equal_N:
+            ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.2)
+            med_ew = []
+            velocity_stat = []
 
-        ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.2)
+            for i in range(len(ew_bins) - 1):
+                ew_low = ew_bins[i]
+                ew_high = ew_bins[i+1]
+                ew_binmask = (masked_ew > ew_low) & (masked_ew <= ew_high)
 
-        velocity_stat = []
-        med_ew = []
+                vels = masked_velocities[ew_binmask]
+                errs = masked_errors[ew_binmask]
+                if len(vels) < 10:
+                    continue
+                
+                stat = np.median(errs) if error else np.std(vels)
 
-        for i in range(len(ew_bins) - 1):
-            ew_low = ew_bins[i]
-            ew_high = ew_bins[i+1]
-            ew_binmask = (masked_ew > ew_low) & (masked_ew <= ew_high)
+                velocity_stat.append(stat)
+                med_ew.append((ew_low + ew_high)/2)
+        else:
+            sorted_inds = np.argsort(masked_ew)
+            EWs = masked_ew[sorted_inds]
+            Velocities = masked_velocities[sorted_inds]
+            Errors = masked_errors[sorted_inds]
 
-            vels = masked_velocities[ew_binmask]
-            errs = masked_errors[ew_binmask]
-            if len(vels) < 10:
-                continue
-            
-            stat = np.median(errs) if error else np.std(vels)
+            n_bins = 20
+            n_points = len(EWs)
+            points_per_bin = n_points//n_bins
+            remainder = n_points % n_bins
 
-            velocity_stat.append(stat)
-            med_ew.append((ew_low + ew_high)/2)
+
+            med_ew = []
+            velocity_stat = []
+            start_idx = 0
+
+            for i in range(n_bins):
+                bin_size = points_per_bin + (1 if i < remainder else 0)
+                end_idx = start_idx + bin_size
+
+                bin_ew = EWs[start_idx:end_idx]
+                bin_vel = Velocities[start_idx:end_idx]
+                bin_err = Errors[start_idx:end_idx]
+
+                stat = np.median(bin_err) if error else np.std(bin_vel)
+                velocity_stat.append(stat)
+                med_ew.append(np.mean(bin_ew))
+                start_idx = end_idx
 
         velocity_stat = np.array(velocity_stat)
         med_ew = np.array(med_ew)
@@ -340,18 +327,20 @@ def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
 
         term_vmap_mask[w] = bin_vel_mask
         
-        if bin_vel >= 0:
-            term_vmap_mask[w] = 9
-            continue
-        
         bin_bD = doppler_param[y, x]
         bD_upper = doppler_param_84[y, x]
         bD_lower = doppler_param_16[y, x]
 
-        term_vmap[w] = abs(bin_vel) + (np.sqrt(abs(np.log(0.1))) * bin_bD)
+        terminal_velocity = bin_vel - (np.sqrt(abs(np.log(0.1))) * bin_bD)
 
-        term_vmap_error[0][w] = np.sqrt( bin_vel_error_16**2 + (np.log(0.1) * bD_lower)**2 )
-        term_vmap_error[1][w] = np.sqrt( bin_vel_error_84**2 + (np.log(0.1) * bD_upper)**2 )
+        if terminal_velocity >= 0:
+            term_vmap_mask[w] = 9
+            continue
+
+        term_vmap[w] = abs(terminal_velocity)
+
+        term_vmap_error[0][w] = np.sqrt( bin_vel_error_16**2 + (np.sqrt(-np.log(0.1)) * bD_lower)**2 )
+        term_vmap_error[1][w] = np.sqrt( bin_vel_error_84**2 + (np.sqrt(-np.log(0.1)) * bD_upper)**2 )
 
     name = "Vout"
     term_vdict = {f"{name}":term_vmap, f"{name} Mask":term_vmap_mask, f"{name} Uncertainty":term_vmap_error}
