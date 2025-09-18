@@ -1,3 +1,4 @@
+import sys
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -235,41 +236,6 @@ def verbose_logger(verbose):
         logger.addHandler(logging.NullHandler())
     return logger
 
-def verbose_warning(verbose, message):
-    """
-    Issues a warning message if `verbose` is set to True.
-
-    This function provides a controlled way to emit warnings in the script based on the verbosity 
-    setting. If `verbose` is True, the warning will be shown; otherwise, no warning is emitted.
-
-    Parameters
-    ----------
-    verbose : bool
-        Flag indicating whether to emit the warning. If True, the warning will be displayed; if 
-        False, no warning is issued.
-
-    message : str
-        The warning message to be displayed when `verbose` is True.
-
-    Examples
-    --------
-    >>> verbose = True
-    >>> verbose_warning(verbose, "This is a warning message.")
-    UserWarning: This is a warning message.
-
-    >>> verbose = False
-    >>> verbose_warning(verbose, "This warning will not be shown.")
-    (No output is produced)
-
-    Notes
-    -----
-    This function uses the `warnings` module to control warning messages.
-    The `UserWarning` category is used by default, but this can be modified 
-    as needed by altering the `warn` function call.
-    """
-    if verbose:
-        warnings.warn(message, category=UserWarning)
-
 
 def progress_printer(iter_int, max_iter, print_string, verbose = True):
     """
@@ -401,3 +367,10 @@ def extract_bin_values(bin_map, data_map, data_mask=None, exclude_unused=True):
     bin_values = valid_data[unique_indices]
 
     return unique_bins, bin_values
+
+def sys_warnings(message, verbose = True):
+    yellow = '\033[93m'
+    reset = '\033[0m'
+    if verbose:
+        print(f"{yellow}WARNING{reset}: {message}", file=sys.stderr)
+    return
