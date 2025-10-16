@@ -34,6 +34,7 @@ def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     v_disp = np.mean(stellar_sigma[~stellar_sigma_mask]) #(iqr(stellar_vel.flatten(), rng=(0.001,99.999)))/2
 
     v_rot = np.max(abs(stellar_vel[~stellar_vel_mask]))
+    v_rot_sigma = np.std(abs(stellar_vel[~stellar_vel_mask]))
 
     if verbose: 
         print(f'Velocity Rotation (max) {v_rot}')
@@ -63,12 +64,13 @@ def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     wavelengths = crval + (np.arange(naxis) - (crpix - 1)) * deltaval
     
     restframe = wavelengths / (1 + redshift)
-    halpha = 6562.8 # angstrom
-    c = 2.998e5
-    rot_lambda = (v_rot / c) * halpha
+    # halpha = 6562.8 # angstrom
+    # c = 2.998e5
+    # rot_lambda = (v_rot / c) * halpha
     
-    i1, i2 = np.argmin(abs(restframe - (halpha - rot_lambda))), np.argmin(abs(restframe - (halpha + rot_lambda)))
-    
+    # i1, i2 = np.argmin(abs(restframe - (halpha - rot_lambda))), np.argmin(abs(restframe - (halpha + rot_lambda)))
+    i1, i2 = np.argmin(abs(restframe - 6586)), np.argmin(abs(restframe - 6605))
+
     sliced_flux = flux_cube[i1:i2,:,:]
 
 
@@ -85,13 +87,15 @@ def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     new_header['CRPIX3'] = (1, 'Reference pixel along wavelength axis')
     new_header['V_DISP'] = (v_disp, 'Mean velocity dispersion (km/s)')
     new_header['V_ROT'] = (v_rot, 'Maximum rotational velocity (km/s)')
+    new_header['VROT_STD'] = (v_rot_sigma, 'Standard deviation of rotational velocity (km/s)')
     new_header['REDSHIFT'] = (redshift, 'Systemic redshift')
     new_header['PA'] = (float(pa), 'Position angle (deg)')
     new_header['R_EFF'] = (float(reff), 'Effective radius')
     new_header['ELL'] = (float(ell), 'Ellipticity 1 - b/a')
     new_header['EBVGAL'] = (float(ebvgal), 'E(B-V) Milky Way dust reddening (mag)')
     new_header['EXTNAME'] = ('PRIMARY', 'FITS HDU extension name')
-    new_header.add_comment(f'H-alpha cube sliced around {halpha} angstrom rest-frame')
+    new_header.add_comment(f'Cube sliced by {restframe[i1]} - {restframe[i2]} angstrom rest-frame')
+    print(f'Cube sliced by {restframe[i1]} - {restframe[i2]} angstrom rest-frame')
 
     if not primary_only:
         raise ValueError("flux and ivar HDUList not currently supported in barolo.py")
@@ -117,7 +121,7 @@ def analysis_run(galname, bin_method, verbose = False):
     local_data_path = defaults.get_data_path('local')
     barolo_path = os.path.join(local_data_path, '3dbarolo')
     outpath = os.path.join(barolo_path, f'{galname}-{bin_method}-Halpha_cube.fits')
-    if not os.path.exists(barolo_path) or os.path.isfile(outpath):
+    if not os.path.exists(barolo_path) or not os.path.isfile(outpath):
         make_ha_cube(galname, bin_method, verbose=verbose)
     else:
         print('Barolo cube exists. Skipping...')
