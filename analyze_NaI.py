@@ -14,9 +14,11 @@ import maps.NaI_SNR
 import maps.NaI_Velocity
 import maps.SFR
 import maps.redshift
-from modules import util, defaults, file_handler, plot_results, inspect
+import maps.BPT
+from modules import util, defaults, file_handler, inspect
 import maps
 import mcmc_results
+import plot_results
 
 ### TODO: Add argument to put lines on inspect plot
 
@@ -28,9 +30,85 @@ def get_args():
     parser.add_argument('--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
     parser.add_argument('--newfile', help='Send the current local_maps fits file to /backups/ instead of attempting to overwrite. (Default: False)', action='store_true', default=False)
     parser.add_argument('--manual', help='Use the manually set EW thresholds for masking in thresholds.yaml. (Default: False)', action='store_true', default=False)
+    parser.add_argument('--paper', help = "Make plots exclusively for the manuscript (default: False)", action='store_true', default = False)
     
     return parser.parse_args()
 
+
+
+def record_galaxy_properties():
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+    from astropy.io import ascii
+    supplementary_dir = defaults.get_data_path('supplemental')
+    sgafil = os.path.join(supplementary_dir, 'sga2020.fits')
+    s4gfil = os.path.join(supplementary_dir, 'asu.fit')
+    madtabfil = os.path.join(supplementary_dir, 'MAD_sample.dat')
+
+    with fits.open(sgafil) as hdu:
+        sgadata = hdu[1].data
+    with fits.open(s4gfil) as hdu:
+        s4gdata = hdu[1].data
+
+    madtable = ascii.read(madtabfil)
+
+    pipelinedir = defaults.get_data_path('pipeline')
+    muse_cubes = os.path.join(pipelinedir, 'muse_cubes')
+    galnames = [dirname for dirname in os.listdir(muse_cubes) if 'NGC' in dirname or 'PGC' in dirname or 'IC' in dirname]
+    
+    dtype = []
+    dtype.append(('name', 'U16'))
+    dtype.append(('ra', 'U16'))
+    dtype.append(('dec', 'U16'))
+    dtype.append(('morph', 'U8'))
+    dtype.append(('redshift', float))
+    dtype.append(('reff', float))
+    dtype.append(('i', float))
+    dtype.append(('logM', float))
+    dtype.append(('SFR', float))
+    dtype.append(('ebv', float))
+
+    data = np.zeros(len(galnames), dtype=dtype)
+    
+    t_type_mapping = {
+    -6: 'cE', -5: 'E', -4: 'E+', -3: 'S0−', -2: 'S0', -1: 'S0+',
+     0: 'S0/a', 1: 'Sa', 2: 'Sab', 3: 'Sb', 4: 'Sbc', 5: 'Sc',
+     6: 'Scd', 7: 'Sd', 8: 'Sdm', 9: 'Sm', 10: 'Im', 11: 'Pec'
+    }#https://ui.adsabs.harvard.edu/abs/1991rc3..book.....D/abstract
+    
+    for i, galname in enumerate(galnames):
+        galdir = os.path.join(muse_cubes, galname)
+
+        sgarow = sgadata[sgadata['GALAXY'] == galname]
+        s4grow = s4gdata[s4gdata['Name'] == galname]
+        madrow = madtable[madtable['col1'] == galname]
+
+        if len(sgarow) != 0:
+            morph = sgarow['MORPHTYPE']
+        elif len(s4grow) != 0:
+            morph = t_type_mapping[s4grow['TT']]
+        else:
+            morph = madtabfil['col2']
+
+        inifil = glob(os.path.join(galdir, "*.ini"))[0]
+        config = file_handler.parse_config(inifil)
+        coords = SkyCoord(float(config['objra']), float(config['objdec']), unit='deg')
+        coords_string = coords.to_string('hmsdms').split(' ')
+
+        ell = float(config['ell'])
+        inclination = (np.arccos(1 - ell) * u.radian).to(u.deg).value
+
+        data[i]['name'] = galname
+        data[i]['ra'] = coords_string[0]
+        data[i]['dec'] = coords_string[1]
+        data[i]['morph'] = morph
+        data[i]['redshift'] = float(config['redshift'])
+        data[i]['reff'] = float(config['reff'])
+        data[i]['i'] = inclination
+
+        data[i]['ebv'] = float(config['ebvgal'])
+
+        
 
 def main(args):
     newfile = args.newfile
@@ -38,6 +116,7 @@ def main(args):
     bin_method = args.bin_method
     verbose = args.verbose
     manual = args.manual
+    paper = args.paper
     analysis_plan = defaults.analysis_plans()
     corr_key = 'BETA-CORR'
 
@@ -66,21 +145,25 @@ def main(args):
     mapsfile = datapath_dict['MAPS']
     cubefile = datapath_dict['LOGCUBE']
 
-    cube_hdu = fits.open(cubefile)
-    maps_hdu = fits.open(mapsfile)
+    with fits.open(cubefile) as cube_hdu:
+        binids = cube_hdu['BINID'].data
+        spatial_bins = binids[0]
+        cube_header = cube_hdu['binid'].header
+
+    with fits.open(mapsfile) as maps_hdu:
+        radius = maps_hdu['bin_lwellcoo'].data[1]
+        maps_header = maps_hdu['bin_lwellcoo'].header
 
     ## write radius map and spatial bin id map to local file
-    radius = maps_hdu['bin_lwellcoo'].data[1]
     radius_mapdict = {"RADIUS":radius}
-    radius_header = file_handler.use_sdss_header(galname, bin_method, "RADIUS", maps_hdu['bin_lwellcoo'].header, desc="radius map", 
+    radius_header = file_handler.use_sdss_header(galname, bin_method, "RADIUS", maps_header, desc="radius map", 
                                                  remove_keywords=['C1', 'U1', 'C3', 'U3', 'C4', 'U4'])
     radius_dict = file_handler.standard_map_dict(galname, radius_mapdict, custom_header_dict=radius_header)
 
-    binids = cube_hdu['BINID'].data
-    spatial_bins = binids[0]
+    
 
     spatial_bins_mapdict = {"SPATIAL_BINS":spatial_bins}
-    spatial_bins_header = file_handler.use_sdss_header(galname, bin_method, "SPATIAL_BINS", cube_hdu['binid'].header, "spatial bin IDs",
+    spatial_bins_header = file_handler.use_sdss_header(galname, bin_method, "SPATIAL_BINS", cube_header, "spatial bin IDs",
                                                        remove_keywords=['C2', 'C3', 'C4', 'C5'])
     spatial_bins_dict = file_handler.standard_map_dict(galname, spatial_bins_mapdict, custom_header_dict=spatial_bins_header)
 
@@ -113,17 +196,20 @@ def main(args):
     # hii_dict, hii_header = collaboration.Hii.get_hii_mapdict(galname, bin_method, placeholder=True, verbose=verbose)
     # hii_mapdict = file_handler.standard_map_dict(galname, hii_dict, custom_header_dict=hii_header)
 
+    ####### BPT #######
+    maps.BPT.classify_galaxy_bpt(galname, bin_method, verbose=verbose)
+
     ####### BAROLO #######
-    collaboration.barolo.make_ha_cube(galname, bin_method, verbose=verbose)
+    collaboration.barolo.analysis_run(galname, bin_method, verbose=verbose)
     
     ###### RESULT PLOTTTING #######
-    plot_results.main(args=args)
+    plot_results.make_plots(galname, bin_method, paper=paper, verbose=verbose)
 
     ## TODO
     ###### INSPECT PLOTTING #######
 
 
 if __name__ == "__main__":
-    warnings.filterwarnings('ignore')
+    warnings.filterwarnings("ignore")
     args = get_args()
     main(args)
