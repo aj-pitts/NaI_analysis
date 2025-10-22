@@ -10,6 +10,8 @@ from astropy.io import fits
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from modules import defaults
 from matplotlib import gridspec
+import pandas as pd
+import seaborn as sns
 
 def check_filepath(filepath, mkdir=True, verbose=True, error=True):
     """
@@ -48,7 +50,7 @@ def check_filepath(filepath, mkdir=True, verbose=True, error=True):
                 if error:
                     raise ValueError(f"'{path}' does not exist")
                 else:
-                    verbose_warning(verbose, f"'{path}' does not exist")
+                    sys_warnings(f"'{path}' does not exist", verbose)
 
 
 def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 2):
@@ -147,7 +149,7 @@ def spec_mask_handler(DAPSPECMASK):
     - The returned array can be used for filtering or masking spectral data during analysis.
     """
     mask = np.zeros_like(DAPSPECMASK)
-    w = (DAPSPECMASK <=9) & (DAPSPECMASK>=2)
+    w = DAPSPECMASK > 0
 
     mask[w] = 1
     return mask
@@ -317,60 +319,77 @@ def mask_arrays(truth_array, *arrays):
         
     return tuple(arr[truth_array] for arr in arrays)
 
-
-def extract_bin_values(bin_map, data_map, data_mask=None, exclude_unused=True):
-    """
-    Extract one value per unique bin.
-
-    Parameters
-    ----------
-    bin_map : 2D array
-        Map of bin IDs.
-    data_map : 2D array
-        Map of data values.
-    data_mask : 2D bool array, optional
-        Mask for data_map. True means masked (ignored).
-    exclude_unused : bool, optional
-        If True, excludes bin ID -1.
-
-    Returns
-    -------
-    bins : ndarray
-        Array of unique bin IDs.
-    values : ndarray
-        Array of one data value per bin.
-    """
-
-    bin_map = np.asarray(bin_map)
-    data_map = np.asarray(data_map)
-
-    if data_mask is None:
-        data_mask = np.zeros_like(bin_map, dtype=bool)
-    else:
-        data_mask = np.asarray(data_mask, dtype=bool)
-
-    # If excluding unused bins, also mask out bin -1
-    if exclude_unused:
-        data_mask = np.logical_or(data_mask, bin_map == -1)
-
-    # Create a flat mask of valid pixels
-    valid_pixels = ~data_mask
-
-    # Only consider valid pixels
-    valid_bins = bin_map[valid_pixels]
-    valid_data = data_map[valid_pixels]
-
-    # Get unique bins and first indices
-    unique_bins, unique_indices = np.unique(valid_bins, return_index=True)
-
-    # Pick one data value for each bin
-    bin_values = valid_data[unique_indices]
-
-    return unique_bins, bin_values
-
 def sys_warnings(message, verbose = True):
     yellow = '\033[93m'
     reset = '\033[0m'
     if verbose:
         print(f"{yellow}WARNING{reset}: {message}", file=sys.stderr)
     return
+
+
+def extract_unique_binned_values(measurement_map: np.ndarray | list | dict, bin_ID_map: np.ndarray, mask = None, return_bad = False, return_bins = False):
+    if return_bad and not isinstance(measurement_map, np.ndarray):
+        raise ValueError(f"return_bad currently not supported for non array measurement maps")
+    
+    map_mask = mask.astype(bool) if mask is not None else np.zeros_like(bin_ID_map).astype(bool)
+
+    good_bins = bin_ID_map[~map_mask]
+    bad_bins = bin_ID_map[map_mask]
+
+    unique_bins, bin_inds = np.unique(good_bins, return_index=True)
+    unique_bins_bad, bin_inds_bad = np.unique(bad_bins, return_index=True)
+
+    if isinstance(measurement_map, list):
+        out_list = []
+        for Map in measurement_map:
+            good_values = Map[~map_mask]
+            unique_values = good_values[bin_inds]
+            out_list.append(unique_values)
+        if return_bins:
+            return out_list, unique_bins
+        return out_list
+    
+    elif isinstance(measurement_map, dict):
+        outdict = {}
+        for key, Map in measurement_map.items():
+            good_values = Map[~map_mask]
+            unique_values = good_values[bin_inds]
+            outdict[key] = unique_values
+
+        if return_bins:
+            outdict['bins'] = unique_bins
+        return outdict
+
+    else:
+        good_values = measurement_map[~map_mask]
+        bad_values = measurement_map[map_mask]
+
+        unique_values = good_values[bin_inds]
+        unique_values_bad = bad_values[bin_inds_bad]
+        if return_bad:
+            if return_bins:
+                return unique_values, unique_bins, unique_values_bad, unique_bins_bad
+            return unique_values, unique_values_bad
+        if return_bins:
+            return unique_values, unique_bins
+        return unique_values
+    
+def seaborn_histplot(xdata: dict, ydata: dict, ax, big_endian = True, pthresh = 0.15, cmap = 'mako'):
+    xkey, x = list(xdata.items())[0]
+    ykey, y = list(ydata.items())[0]
+
+
+    dtype = '<f8' if big_endian else None
+
+    df = pd.DataFrame({
+        xkey : np.asarray(x, dtype=dtype),
+        ykey : np.asarray(y, dtype=dtype)
+    })
+    
+    # x_bins = np.arange(np.min(x), np.max(x) + 0.1, 0.1)
+    # y_bins = np.arange(np.min(y), np.max(y) + 0.1, 0.1)
+
+    sns.histplot(data=df, x=xkey, y=ykey, pthresh=pthresh, ax=ax, cmap=cmap)#, bins=(x_bins, y_bins))
+
+def seaborn_palette(name, ncolors = 256, cmap = True):
+    return sns.color_palette(name, n_colors=ncolors, as_cmap=cmap)

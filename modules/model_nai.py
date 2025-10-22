@@ -3,7 +3,7 @@ import scipy.special as sp
 from linetools.spectra.xspectrum1d import XSpectrum1D
 from linetools.spectra import convolve as lsc
 from astropy import units as u
-import defaults
+from modules import defaults
 import os
 
 def get_velres(redshift, modwave):

@@ -78,290 +78,104 @@ def threshold_bins(galname, bin_method, nbins = 10, verbose = False):
                              fname = f'{galname}-{bin_method}_{key}_goodbin_inspect.pdf', verbose=verbose)
 
 
+# def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_mask = None, 
+#                     ewnoem = False, scatter_lim = 30, fig_save_dir = None, verbose=False):
+#     if fig_save_dir is not None:
+#         check_filepath(fig_save_dir, mkdir=False, verbose=verbose)
+#     plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
 
-def inspect_bin_profiles(galname, bin_method, bin_list, snrs = None, ews = None,
-                         show = False, save = True, fname = None, show_emline_masking = False, 
-                         show_samples = False, verbose = False):
-    if len(bin_list) > 100:
-        raise ValueError(f"Input of {len(bin_list)} bins too large. Recommended 100 or less bins at a time.")
-    
-    if snrs is not None:
-        if len(bin_list) != len(snrs):
-            raise ValueError(f"S/N array does not match Bin array")
-    if ews is not None:
-        if len(bin_list) != len(ews):
-            raise ValueError(f"EW array does not match Bin array")
-    
-    verbose_print(f"Plotting line profiles for {len(bin_list)} bins...")
-    plt.style.use(os.path.join(defaults.get_default_path('config'), 'figures.mplstyle'))
+#     outpath = defaults.get_fig_paths(galname, bin_method, 'inspection') if fig_save_dir is None else fig_save_dir
+#     util.check_filepath(outpath,mkdir=True,verbose=verbose)
 
-    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
-    local_file = datapath_dict['LOCAL']
-    cube_file = datapath_dict['LOGCUBE']
-    
-    cube = fits.open(cube_file)
-    local_maps = fits.open(local_file)
+#     file_end = '_maskedem' if ewnoem else ''
+#     out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_scatter{file_end}.pdf')
 
-    spatial_bins = cube['binid'].data[0]
-    flux = cube['flux'].data 
-    wave = cube['wave'].data 
-    stellar_cont = cube['model'].data 
-    #ivar = cube['ivar'].data
+#     thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+#     snranges = thresholds['sn_lims']
+#     ewlims = thresholds['ew_lims']
 
-    redshift = local_maps['redshift'].data
-    mcmc_cube = local_maps['mcmc_results'].data
-    mcmc_16 = local_maps['mcmc_16th_perc'].data 
-    mcmc_84 = local_maps['mcmc_84th_perc'].data 
-    
-    NaD_window = (5875, 5915)
-    #NaD_window = (5880, 5920)
-    NaD_rest = [5891.5833, 5897.5581]
+#     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose=False, redshift=False)
+#     local_file = datapath_dict['LOCAL']
+#     hdul = fits.open(local_file)
 
-    ndim = int(np.ceil(np.sqrt(len(bin_list))))
-    ncol = min(ndim, 10)
-    nrow = int(np.ceil(len(bin_list) / ncol))
+#     spatial_bins = hdul['spatial_bins'].data.flatten()
+#     unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
 
-    fig_width = ncol * 3
-    fig_height = nrow * 3
-    fig = plt.figure(figsize=(fig_width, fig_height))
-    
-    fontsize = max(15, fig.get_size_inches()[1])
-    text_size = fontsize//3
+#     snr = hdul['nai_snr'].data.flatten()[bin_inds]
 
-    total_subplots = len(bin_list)
-    for i in range(total_subplots):
-        row_idx = i // ncol  # Current row index
-        col_idx = i % ncol   # Current column index
-        # Calculate the number of subplots in the last row
-        is_last_row = (row_idx == nrow - 1)
-        last_row_cols = total_subplots % ncol
-        if last_row_cols == 0 and total_subplots != 0:
-            last_row_cols = ncol  # If no remainder, the last row fills all columns
+#     hduname = 'ew_noem' if ewnoem else 'ew_nai'
+#     ew = hdul[hduname].data.flatten()[bin_inds]
+#     ew_mask = hdul[f'{hduname}_mask'].data.flatten().astype(bool)[bin_inds]
 
-        Bin = bin_list[i]
-        sn = snrs[i]
-        ew = ews[i]
-        w = Bin == spatial_bins
-        ny, nx = np.where(w)
-        y = ny[0]
-        x = nx[0]
+#     velocity = vmap.flatten()[bin_inds]
+#     #velocity_err = vmap_error.flatten()[bin_inds]
+#     if vmap_mask is not None:
+#         velocity_mask = vmap_mask.flatten()[bin_inds]
+#         velocity_mask[velocity_mask == 7] = 0
+#         velocity_mask = velocity_mask.astype(bool)
+#         datamask = np.logical_and(ew_mask, velocity_mask)
+#     else:
+#         datamask = ew_mask
 
-        z = redshift[y, x]
-        restwave = wave / (1 + z)
-        flux_1D = flux[:, y, x]
-        model_1D = stellar_cont[:, y, x]
-        nflux = flux_1D / model_1D
+#     fig = plt.figure(figsize=(8,8))
 
-        wave_window = (restwave >= NaD_window[0]) & (restwave <= NaD_window[1])
-        inds = np.where(wave_window)
+#     for i, (sn_low, sn_high) in enumerate(snranges):
+#         sn_low = int(sn_low) if np.isfinite(sn_low) else sn_low
+#         sn_high = int(sn_high) if np.isfinite(sn_high) else sn_high
 
-        gs_parent = gridspec.GridSpec(nrow, ncol, figure=fig)
-        subplot_spec = gs_parent[i]  # Get the SubplotSpec
-        gs = subplot_spec.subgridspec(3, 1, height_ratios=[2,1,0], hspace=0)
-        #gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=fig.add_subplot(nrow, ncol, i+1), height_ratios=[3,1])
+#         gs_parent = gridspec.GridSpec(2, 2, figure=fig)
+#         subplot_spec = gs_parent[i]  # Get the SubplotSpec
+#         gs = subplot_spec.subgridspec(2, 1, height_ratios=[2,1], hspace=0.1)
 
-        ax1 = fig.add_subplot(gs[0])
+#         ax1 = fig.add_subplot(gs[0])
+#         ax2 = fig.add_subplot(gs[1])
 
-        ax1.plot(restwave[inds], nflux[inds], 'k', drawstyle='steps-mid')
-        if show_emline_masking:
-            s=1
-            blim = [5850.0, 5870.0]
-            rlim = [5910.0, 5930.0]
-            bind = np.where((restwave > blim[0]) & (restwave < blim[1]))
-            rind = np.where((restwave > rlim[0]) & (restwave < rlim[1]))
-
-            continuum = np.concatenate((nflux[bind], nflux[rind]))
-            med = np.median(continuum)
-            std = np.std(continuum)
-            continuum_mask = (continuum < med + s * std) & (continuum > med - s * std)
-
-            median = np.median(continuum[continuum_mask])
-            standard_dev = np.std(continuum[continuum_mask])
-
-            wave_window = (restwave >= NaD_window[0]) & (restwave <= NaD_window[1])
-            inds = np.where(wave_window)
-
-            mask = nflux[inds] > median + s * standard_dev
-            ax1.scatter(restwave[inds][mask], nflux[inds][mask], c='r', marker='x', s=20)
-
-        #ax1.hlines([1], xmin=NaD_window[0], xmax=NaD_window[1], colors='k', alpha=0.4, linewidths=0.5, linestyles='dashed')
-
-        #ax.set_title(f"Bin {Bin}")
-        ax1.text(.075,.85, f"Bin {Bin}", transform=ax1.transAxes, fontsize=text_size)
-        ax1.text(.925,.725, rf"$S/N = {sn:.0f}$", transform=ax1.transAxes, ha='right', fontsize=text_size)
-        ax1.text(.925,.85, rf"$\mathrm{{EW}} = {ew:.4f}\ \mathrm{{\AA}}$", transform=ax1.transAxes, ha='right', fontsize=text_size)
-
-        lambda_0 = mcmc_cube[0, y, x]
-        lambda_16 = mcmc_16[0, y, x]
-        lambda_84 = mcmc_84[0, y, x]
-
-        ax1.fill_between([lambda_0-lambda_16, lambda_0+lambda_84], [-20, -20], [20, 20], color='r',
-                        alpha=0.1)
-        ax1.vlines([lambda_0], -20, 20, colors = 'black', linestyles = 'dashed', linewidths = 2)
-
-        #ax1.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
+#         w = (snr > sn_low) & (snr <= sn_high)
+#         mask = np.logical_and(w, ~datamask)
         
-        ax1.set_ylim(.75, 1.2)
-        ax1.set_xlim(NaD_window[0], NaD_window[1])
-        ax1.set_box_aspect(3/4)
-        ax1.set_xticklabels([])
-
-
-        ax2 = fig.add_subplot(gs[1])
-
-        # min_flux = round(min(flux_1D[inds].min(), model_1D[inds].min()), 2)
-        # max_flux = round(max(flux_1D[inds].max(), model_1D[inds].max()), 2)
-        med_flux = round(max(np.median(flux_1D[inds]), np.median(model_1D[inds])), 2)
-
-        ax2.plot(restwave[inds], flux_1D[inds] / med_flux, 'dimgray', drawstyle = 'steps-mid', lw=1.4)
-        ax2.plot(restwave[inds], model_1D[inds] / med_flux, 'tab:blue', drawstyle = 'steps-mid', lw=1.1)
-        #ax2.vlines(NaD_rest, -20, 20, colors = 'black', linestyles = 'dotted', linewidths = .8)
+#         ew_bin = ew[mask]
+#         v_bin = velocity[mask]
         
-        ax2.set_ylim(.65, 1.2)
-        ax2.set_xlim(NaD_window[0], NaD_window[1])
-        ax2.set_box_aspect(3/8)
+#         ax1.scatter(ew_bin, v_bin, s=0.5)
+#         ax1.vlines(ewlims[i], -1000, 1000, colors='k', linestyles='dotted', linewidths=1.5, label=rf'{ewlims[i]:.1f} $\mathrm{{\AA}}$')
+#         ax1.legend(frameon=False, loc='upper right')
+#         ax1.grid(visible=True, linewidth=0.5, zorder=0)
 
-        if col_idx >= 1:
-            ax1.set_yticklabels([])
-            ax2.set_yticklabels([])
+#         ax1.set_ylim(-750, 750)
+#         if ewnoem:
+#             ax1.set_xlim(0,3)
+#         else:
+#             ax1.set_xlim(-1, 3)
+#         ax1.set_xticklabels([])
+#         ax1.tick_params(labelsize=12)
 
-        # Remove x tick labels on all rows except the last one
-        if not is_last_row:
-            ax2.set_xticklabels([])
-
-        # (Optional) Handle second-to-last row cleanup only when last row is partial
-        if last_row_cols != ncol:
-            if row_idx == nrow - 2 and col_idx >= last_row_cols:
-                ax2.set_xticklabels([])
-
-    #fig.text(0.5, 0.05, r'Wavelength $\left( \mathrm{\AA} \right)$', ha='center', va='center', fontsize=fontsize)
-    fig.supxlabel(r'Wavelength $\left( \mathrm{\AA} \right)$', fontsize=fontsize)
-    # fig.text(0.05, 0.5, r'Flux (top: Normalized, Bottom: $\left[ \mathrm{1E-17\ erg\ s^{-1}\ cm^{-2}\ \AA^{-1}\ spaxel^{-1}} \right]$)',
-    #          rotation='vertical',ha='center',va='center', fontsize=fontsize)
-
-    #fig.text(0.05, 0.5, r'Normalized Flux', rotation='vertical',ha='center',va='center', fontsize=fontsize)
-    fig.supylabel(r'Normalized Flux', fontsize=fontsize)
-    #fig.text(0.06, 0.5, r'top: Normalized', rotation='vertical',ha='center',va='center', fontsize=fontsize)
-    #fig.text(0.07, 0.5, r'bottom: $\mathrm{1E-17\ erg\ s^{-1}\ cm^{-2}\ \AA^{-1}\ spaxel^{-1}}$', rotation='vertical',ha='center',va='center', fontsize=fontsize)
-
-    fig.subplots_adjust(wspace=-0.15, hspace=0.05)
-    if save:
-        output_dir = defaults.get_fig_paths(galname, bin_method, subdir = 'inspection')
-        if fname is None:
-            fname = 'bin_inspect.pdf'
-        else:
-            root, ext = os.path.splitext(fname)
-            if ext != '.pdf':
-                sys_warnings(f"Filename extension of {ext} invalid. Defaulting to PDF", verbose)
-                fname = root+'.pdf'
-
-        figpath = os.path.join(output_dir, fname)
-        plt.savefig(figpath, bbox_inches='tight')
-        verbose_print(verbose, f'Bin inspection figure saved to {figpath}')
-    if show:
-        plt.show()
-    else:
-        plt.close()
+#         ax1.set_title(rf"${sn_low} < S/N \leq {sn_high}$")
+#         ax1.set_ylabel(r'$v_{\mathrm{cen}}\ \mathrm{(km\ s^{-1})}$',fontsize=14)
 
 
-def inspect_vstd_ew(galname, bin_method, threshold_data, vmap, vmap_error, vmap_mask = None, 
-                    ewnoem = False, scatter_lim = 30, fig_save_dir = None, verbose=False):
-    if fig_save_dir is not None:
-        check_filepath(fig_save_dir, mkdir=False, verbose=verbose)
-    plt.style.use(os.path.join(defaults.get_default_path(subdir='config'), 'figures.mplstyle'))
+#         key = f"{sn_low}-{sn_high}"
+#         subdict = threshold_data[key]
+#         v_std = subdict['std']
+#         med_ew = subdict['medew']
+#         ax2.plot(med_ew, v_std, drawstyle='steps-mid', color='dimgray')
+#         ax2.set_yscale('log')
+#         ax2.hlines([scatter_lim], -10, 10, colors='k', linestyles='dashed', linewidths = 1)
 
-    outpath = defaults.get_fig_paths(galname, bin_method, 'inspection') if fig_save_dir is None else fig_save_dir
-    util.check_filepath(outpath,mkdir=True,verbose=verbose)
+#         ax2.set_ylim(0, 1000)
+#         if ewnoem:
+#             ax2.set_xlim(0,3)
+#         else:
+#             ax2.set_xlim(-1, 3)
+#         ax2.tick_params(labelsize=12)
 
-    file_end = '_maskedem' if ewnoem else ''
-    out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_scatter{file_end}.pdf')
+#         ax2.set_ylabel(r'$\mathrm{med}\ \sigma_{v_{\mathrm{cen}}}$', fontsize=14)
+#         if i == 1 or i == 3:
+#             ax1.set_ylabel('')
+#             ax2.set_ylabel('')
 
-    thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=False)
-    snranges = thresholds['sn_lims']
-    ewlims = thresholds['ew_lims']
-
-    datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose=False, redshift=False)
-    local_file = datapath_dict['LOCAL']
-    hdul = fits.open(local_file)
-
-    spatial_bins = hdul['spatial_bins'].data.flatten()
-    unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
-
-    snr = hdul['nai_snr'].data.flatten()[bin_inds]
-
-    hduname = 'ew_noem' if ewnoem else 'ew_nai'
-    ew = hdul[hduname].data.flatten()[bin_inds]
-    ew_mask = hdul[f'{hduname}_mask'].data.flatten().astype(bool)[bin_inds]
-
-    velocity = vmap.flatten()[bin_inds]
-    #velocity_err = vmap_error.flatten()[bin_inds]
-    if vmap_mask is not None:
-        velocity_mask = vmap_mask.flatten()[bin_inds]
-        velocity_mask[velocity_mask == 7] = 0
-        velocity_mask = velocity_mask.astype(bool)
-        datamask = np.logical_and(ew_mask, velocity_mask)
-    else:
-        datamask = ew_mask
-
-    fig = plt.figure(figsize=(8,8))
-
-    for i, (sn_low, sn_high) in enumerate(snranges):
-        sn_low = int(sn_low) if np.isfinite(sn_low) else sn_low
-        sn_high = int(sn_high) if np.isfinite(sn_high) else sn_high
-
-        gs_parent = gridspec.GridSpec(2, 2, figure=fig)
-        subplot_spec = gs_parent[i]  # Get the SubplotSpec
-        gs = subplot_spec.subgridspec(2, 1, height_ratios=[2,1], hspace=0.1)
-
-        ax1 = fig.add_subplot(gs[0])
-        ax2 = fig.add_subplot(gs[1])
-
-        w = (snr > sn_low) & (snr <= sn_high)
-        mask = np.logical_and(w, ~datamask)
-        
-        ew_bin = ew[mask]
-        v_bin = velocity[mask]
-        
-        ax1.scatter(ew_bin, v_bin, s=0.5)
-        ax1.vlines(ewlims[i], -1000, 1000, colors='k', linestyles='dotted', linewidths=1.5, label=rf'{ewlims[i]:.1f} $\mathrm{{\AA}}$')
-        ax1.legend(frameon=False, loc='upper right')
-        ax1.grid(visible=True, linewidth=0.5, zorder=0)
-
-        ax1.set_ylim(-750, 750)
-        if ewnoem:
-            ax1.set_xlim(0,3)
-        else:
-            ax1.set_xlim(-1, 3)
-        ax1.set_xticklabels([])
-        ax1.tick_params(labelsize=12)
-
-        ax1.set_title(rf"${sn_low} < S/N \leq {sn_high}$")
-        ax1.set_ylabel(r'$v_{\mathrm{cen}}\ \mathrm{(km\ s^{-1})}$',fontsize=14)
-
-
-        key = f"{sn_low}-{sn_high}"
-        subdict = threshold_data[key]
-        v_std = subdict['std']
-        med_ew = subdict['medew']
-        ax2.plot(med_ew, v_std, drawstyle='steps-mid', color='dimgray')
-        ax2.set_yscale('log')
-        ax2.hlines([scatter_lim], -10, 10, colors='k', linestyles='dashed', linewidths = 1)
-
-        ax2.set_ylim(0, 1000)
-        if ewnoem:
-            ax2.set_xlim(0,3)
-        else:
-            ax2.set_xlim(-1, 3)
-        ax2.tick_params(labelsize=12)
-
-        ax2.set_ylabel(r'$\mathrm{med}\ \sigma_{v_{\mathrm{cen}}}$', fontsize=14)
-        if i == 1 or i == 3:
-            ax1.set_ylabel('')
-            ax2.set_ylabel('')
-
-    fig.text(0.5, 0, r'$\mathrm{EW_{Na\ D}}\ (\mathrm{\AA})$', ha='center',va='center',fontsize=18)
-    plt.savefig(out_file, bbox_inches='tight')
-    verbose_print(verbose, f"Saving velocity scatter figure to {out_file}")
+#     fig.text(0.5, 0, r'$\mathrm{EW_{Na\ D}}\ (\mathrm{\AA})$', ha='center',va='center',fontsize=18)
+#     plt.savefig(out_file, bbox_inches='tight')
+#     verbose_print(verbose, f"Saving velocity scatter figure to {out_file}")
 
 
 

@@ -74,7 +74,6 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
     mcmcpath = os.path.join(pipeline_data, "mcmc_outputs", galsubdir, corr_key, analysisplan)
     musecubepath = os.path.join(pipeline_data, "muse_cubes", galname)
     localdatapath = os.path.join(local_data, "local_outputs", galsubdir, corr_key, analysisplan)
-    localdatasubpath = os.path.join(localdatapath, "maps")
 
     outdict = {'CONFIG':None, 
                'LOGCUBE':None, 
@@ -173,17 +172,6 @@ def init_datapaths(galname, bin_method, verbose=False, redshift = True):
                     util.verbose_print(verbose, f"Using LOCAL File: {file}")
         if outdict['LOCAL'] is None:
             util.sys_warnings(f"*local_maps.fits file not found in {localdatapath}", verbose)
-
-    ### individual local maps
-    if not os.path.exists(localdatasubpath):
-        util.sys_warnings(f"Filepath does not exist: {localdatasubpath}", verbose)
-    else:
-        localfils = glob(os.path.join(localdatasubpath, "*.fits"))
-        if len(localfils) == 0:
-            util.sys_warnings(f"No map files in {localdatasubpath}", verbose)
-        else:
-            outdict['LOCAL_MAPS'] = localfils
-            util.verbose_print(f"'LOCAL' key: {len(localfils)} local maps found in {localdatasubpath}")
 
     return outdict
 
@@ -555,6 +543,7 @@ def reorder_hdu(hdul):
         'EW_NAI', 'EW_NAI_MASK', 'EW_NAI_ERROR',
         'EW_NOEM', 'EW_NOEM_MASK', 'EW_NOEM_ERROR'
         'SFRSD', 'SFRSD_MASK', 'SFRSD_ERROR',
+        'E(B-V)',
         'V_NaI', 'V_NaI_FRAC', 'V_NaI_MASK', 'V_NaI_ERROR',
         'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
         'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCMC_84TH_PERC',
