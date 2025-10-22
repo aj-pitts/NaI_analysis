@@ -58,7 +58,6 @@ def correct_dust(F_Ha, F_Hb, HaHb_ratio = 2.87, Rv = 3.1, k_Ha = 2.45, k_Hb = 3.
     >>> F_Hb = np.array([30, 20, 10, 0])
     >>> correct_dust(F_Ha, F_Hb)
     array([ corrected_flux_value_1, corrected_flux_value_2, nan, nan ])
-
     """
     E_BV = np.zeros(F_Ha.shape)
     F_corr = np.zeros(F_Ha.shape)
@@ -208,26 +207,25 @@ def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data
             Array of propagated uncertainties associated with the SFRSD measurements.
     """
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
-    # open the MAPS file
-    maps = fits.open(datapath_dict['MAPS'])
     redshift = datapath_dict['Z']
+    # open the MAPS file
+    with fits.open(datapath_dict['MAPS']) as maps:
+        # stellar kinematics
+        stellar_vel = maps['STELLAR_VEL'].data
+        stellar_vel_ivar = maps['STELLAR_VEL_IVAR'].data
+        stellar_vel_mask = maps['STELLAR_VEL_MASK'].data
 
-    # stellar kinematics
-    stellar_vel = maps['STELLAR_VEL'].data
-    stellar_vel_ivar = maps['STELLAR_VEL_IVAR'].data
-    stellar_vel_mask = maps['STELLAR_VEL_MASK'].data
-
-    # bin ids
-    binids = maps['BINID'].data
-    spatial_bins = binids[0]
-    uniqids = np.unique(spatial_bins)
-    
-    emline_key = f"EMLINE_{flux_key}"
-    
-    # init the data
-    flux = maps[emline_key].data
-    ivar = maps[f"{emline_key}_IVAR"].data
-    mask = maps[f"{emline_key}_MASK"].data
+        # bin ids
+        binids = maps['BINID'].data
+        spatial_bins = binids[0]
+        uniqids = np.unique(spatial_bins)
+        
+        emline_key = f"EMLINE_{flux_key}"
+        
+        # init the data
+        flux = maps[emline_key].data
+        ivar = maps[f"{emline_key}_IVAR"].data
+        mask = maps[f"{emline_key}_MASK"].data
 
     # init empty maps
     SFRSD_map = np.zeros(spatial_bins.shape) - 999.0

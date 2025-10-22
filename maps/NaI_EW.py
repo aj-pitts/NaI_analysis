@@ -8,10 +8,12 @@ from modules import defaults, util, file_handler, plotter
 
 
 def boxcar_EW(wavelengths, wavelength_error, normflux, normflux_error):
-    ones = np.ones(len(normflux))
-    dLambda = np.gradient(wavelengths) #np.array([np.median(np.diff(wavelengths)) * len(normflux)]) # Delta lambda
-    dLambda_sigma = np.gradient(wavelength_error) #np.array([np.median(np.diff(wavelength_error)) * len(normflux)])
-
+    try:
+        ones = np.ones(len(normflux))
+        dLambda = np.gradient(wavelengths) #np.array([np.median(np.diff(wavelengths)) * len(normflux)]) # Delta lambda
+        dLambda_sigma = np.gradient(wavelength_error) #np.array([np.median(np.diff(wavelength_error)) * len(normflux)])
+    except:
+        breakpoint()
     EW = np.sum(  (( ones - normflux ) * dLambda)  )
     EW_err = np.sqrt( np.sum( ((dLambda * normflux_error)**2 + ((ones - normflux) * dLambda_sigma)**2) ) )
     return EW, EW_err
@@ -79,20 +81,19 @@ def measure_EW(galname, bin_method, verbose=False, write_data = True):
     c = 2.998e5 #speed of light km/s
         
     ## init the data
-    cube = fits.open(datapath_dict['LOGCUBE'])
-    local = fits.open(datapath_dict['LOCAL'])
-    
-    flux = cube['FLUX'].data
-    ivar = cube['IVAR'].data
-    mask = cube['MASK'].data #DAPSPECMASK
-    wave = cube['WAVE'].data
-    model = cube['MODEL'].data
-    model_mask = cube['MODEL_MASK'].data #DAPSPECMASK
-    binids = cube['BINID'].data 
+    with fits.open(datapath_dict['LOGCUBE']) as cube:
+        flux = cube['FLUX'].data
+        ivar = cube['IVAR'].data
+        mask = cube['MASK'].data #DAPSPECMASK
+        wave = cube['WAVE'].data
+        model = cube['MODEL'].data
+        #model_mask = cube['MODEL_MASK'].data #DAPSPECMASK
+        binids = cube['BINID'].data 
 
-    zmap = local['redshift'].data
-    zmap_error = local['redshift_error'].data
-    zmap_mask = local['redshift_mask'].data
+    with fits.open(datapath_dict['LOCAL']) as local:
+        zmap = local['redshift'].data
+        zmap_error = local['redshift_error'].data
+        zmap_mask = local['redshift_mask'].data
 
 
     spatial_bins = binids[0]
@@ -121,6 +122,8 @@ def measure_EW(galname, bin_method, verbose=False, write_data = True):
     ewmap_mask[w] = 6
     ewmap_noem_mask[w] = 6
 
+    overmasked_count = 0
+    overmasked_noem_count = 0
     for ID in iterator:
         w = spatial_bins == ID
         ny, nx = np.where(w)
@@ -145,40 +148,38 @@ def measure_EW(galname, bin_method, verbose=False, write_data = True):
         mask_bin = util.spec_mask_handler(mask[:, y, x])
 
         model_bin = model[:, y, x]
-        model_mask_bin = util.spec_mask_handler(model_mask[:, y, x])
-        
-        ## combine DAP masks and finite values
-        datamask = np.logical_and(~mask_bin.astype(bool), ~model_mask_bin.astype(bool))
+        #model_mask_bin = util.spec_mask_handler(model_mask[:, y, x])
+
+        ## combine the two masks & also mask out where the model is zero
+        #dap_unmasked = np.logical_and(~mask_bin.astype(bool), ~model_mask_bin.astype(bool))
+        dap_unmasked = ~mask_bin.astype(bool)
         finite_mask = model_bin > 0
-        norm_mask = np.logical_and(datamask, finite_mask)
-
-        ## normalize flux by the model with the masks
-        norm_flux = flux_bin[norm_mask] / model_bin[norm_mask]
-        norm_error = flux_err[norm_mask] / model_bin[norm_mask]
-        wavelength = restwave[norm_mask]
-        wavelength_error = restwave_sigma[norm_mask]
-
-        if len(norm_flux) == 0:
-            ewmap_mask[w] = 4
-            ewmap_noem_mask[w] = 4
-            continue
+        dataselect = np.logical_and(dap_unmasked, finite_mask)
 
         ## get the indices defining the Na D wavelength region
-        nad_inds = np.where((wavelength >= nad_region[0]) & (wavelength <= nad_region[1]))[0]
+        nad_truth = (restwave >= nad_region[0]) & (restwave <= nad_region[1])
+        nad_select = np.logical_and(nad_truth, dataselect)
 
-        if len(nad_inds) < 10:
+        ## check if there are still enough values to continue
+        if np.sum(nad_select) < 10:
             ewmap_mask[w] = 4
             ewmap_noem_mask[w] = 4
+            overmasked_count+=1
             continue
 
-        ## extract Na D values
-        norm_flux_nad = norm_flux[nad_inds]
-        norm_error_nad = norm_error[nad_inds]
-        restwave_nad = wavelength[nad_inds]
-        restwave_error_nad = wavelength_error[nad_inds]
+        ## slice all arrays to Na D to reduce runtime of next computation steps
+        flux_nad = flux_bin[nad_select]
+        error_nad = flux_err[nad_select]
+        model_nad = model_bin[nad_select]
+        restwave_nad = restwave[nad_select]
+        restwave_error_nad = restwave_sigma[nad_select]
+
+        ## normalize flux by the model
+        norm_flux = flux_nad / model_nad
+        norm_error = error_nad / model_nad
 
         ## compute equivalent width
-        EW, EW_err = boxcar_EW(restwave_nad, restwave_error_nad, norm_flux_nad, norm_error_nad)
+        EW, EW_err = boxcar_EW(restwave_nad, restwave_error_nad, norm_flux, norm_error)
 
         if np.isfinite(EW):
             ewmap[w] = EW
@@ -191,34 +192,38 @@ def measure_EW(galname, bin_method, verbose=False, write_data = True):
             ewmap_mask[w] = 5
 
         ## compute EW again with emline masking
+        ## get wavelengths of unmasked DAP and non zero model values
+        restwave_select = restwave[dataselect]
+
+        ## get indices of blue and redward continuum regions
         blue_lims = continuum_lims[0]
-        blue_inds = np.where((restwave > blue_lims[0]) & (restwave < blue_lims[1]))[0]
+        blue_inds = np.where((restwave_select > blue_lims[0]) & (restwave_select < blue_lims[1]))[0]
 
         red_lims = continuum_lims[1]
-        red_inds = np.where((restwave > red_lims[0]) & (restwave < red_lims[1]))[0]
+        red_inds = np.where((restwave_select > red_lims[0]) & (restwave_select < red_lims[1]))[0]
 
+        ## combine continuum indices and slice flux / model
         continuum_inds = np.concatenate([blue_inds, red_inds])
-        norm_flux_continuum = norm_flux[continuum_inds]
+        norm_flux_continuum = flux_bin[continuum_inds] / model_bin[continuum_inds]
 
-        continuum_filter = (norm_flux_continuum > np.median(norm_flux_continuum) - np.std(norm_flux_continuum)) & (norm_flux_continuum < np.median(norm_flux_continuum) + np.std(norm_flux_continuum))
-        continuum_filtered = norm_flux_continuum[continuum_filter]
-
-        median = np.median(continuum_filtered)
-        std = np.std(continuum_filtered)
+        ## calculate the emission line threshold and create a truth array to select values where the flux is below the threshold
+        median = np.median(norm_flux_continuum)
+        std = np.std(norm_flux_continuum)
         emline_threshold = median + std
 
-        flux_filter = norm_flux_nad < emline_threshold
+        noem_select = norm_flux < emline_threshold ## already sliced to Na D and DAPmask + infinte removed
 
-        norm_flux_nad = norm_flux_nad[flux_filter]
-        norm_error_nad = norm_error_nad[flux_filter]
-        restwave_nad = restwave_nad[flux_filter]
-        restwave_error_nad = restwave_error_nad[flux_filter]
-
-        if len(norm_flux_nad)<=5:
+        if np.sum(noem_select)<=5:
             ewmap_noem_mask[w] = 4
+            overmasked_noem_count += 1
             continue
 
-        EW_noem, EW_err_noem = boxcar_EW(restwave_nad, restwave_error_nad, norm_flux_nad, norm_error_nad)
+        norm_flux_noem = norm_flux[noem_select]
+        norm_error_noem = norm_error[noem_select]
+        restwave_noem = restwave_nad[noem_select]
+        restwave_error_noem = restwave_error_nad[noem_select]
+
+        EW_noem, EW_err_noem = boxcar_EW(restwave_noem, restwave_error_noem, norm_flux_noem, norm_error_noem)
 
         if np.isfinite(EW_noem):
             ewmap_noem[w] = EW_noem
@@ -233,6 +238,10 @@ def measure_EW(galname, bin_method, verbose=False, write_data = True):
     EW_dict = {"EW Map":ewmap, "EW Map Mask":ewmap_mask, "EW Map Uncertainty":ewmap_error}
     EW_noem_dict = {"EW NOEM Map":ewmap_noem, "EW NOEM Mask":ewmap_noem_mask, "EW NOEM Uncertainty":ewmap_noem_error}
 
+    if overmasked_count>0:
+        util.sys_warnings(f"EW SKIPPED {overmasked_count} BINS DUE TO OVERMASK", verbose=verbose)
+    if overmasked_noem_count>0:
+        util.sys_warnings(f"EWNOEM SKIPPED {overmasked_noem_count} BINS DUE TO OVERMASK", verbose=verbose)
     if write_data:
         ew_mapdict = file_handler.standard_map_dict(galname, EW_dict, HDU_keyword="EW_NAI", IMAGE_units="Angstrom")
         ew_noem_mapdict = file_handler.standard_map_dict(galname, EW_noem_dict, HDU_keyword="EW_NOEM", IMAGE_units="Angstrom")

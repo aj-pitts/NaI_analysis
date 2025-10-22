@@ -7,19 +7,18 @@ from modules import file_handler
 def NaD_snr_map(galname, bin_method, zmap = None, verbose=False, write_data = True):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
 
-    cube = fits.open(datapath_dict['LOGCUBE'])
-    maps = fits.open(datapath_dict['MAPS'])
+    with fits.open(datapath_dict['LOGCUBE']) as cube:
+        spatial_bins = cube['BINID'].data[0]
+        fluxcube = cube['FLUX'].data
+        ivarcube = cube['IVAR'].data
+        wave = cube['WAVE'].data
 
-    spatial_bins = cube['BINID'].data[0]
-    fluxcube = cube['FLUX'].data
-    ivarcube = cube['IVAR'].data
-    wave = cube['WAVE'].data
-
-    stellarvel = maps['STELLAR_VEL'].data
+    with fits.open(datapath_dict['MAPS']) as maps:
+        stellarvel = maps['STELLAR_VEL'].data
 
     if zmap is None:
-        local = fits.open(datapath_dict['LOCAL'])
-        zmap = local['redshift'].data
+        with fits.open(datapath_dict['LOCAL']) as local:
+            zmap = local['redshift'].data
 
     snr_map = np.zeros_like(stellarvel)
     windows = [(5865, 5875), (5915, 5925)]

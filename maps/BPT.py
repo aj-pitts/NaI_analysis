@@ -289,6 +289,7 @@ def classify_galaxy_bpt(galname: str, bin_method: str, include_errors = False, v
     iterator = tqdm(unique_bins, desc="Computing BPT classifications") if verbose else unique_bins
 
     classification_int = {
+        'Unclassified':0,
         'Star-forming':1,
         'Composite':2,
         'Seyfert':3,
@@ -334,36 +335,11 @@ def classify_galaxy_bpt(galname: str, bin_method: str, include_errors = False, v
         }
     }
 
-    BPT_dict = {hduname, BPTmap}
+    BPT_dict = {hduname : BPTmap}
 
     BPT_mapdict = file_handler.standard_map_dict(galname, BPT_dict, custom_header_dict=BPTheader)
     file_handler.write_maps_file(galname, bin_method, [BPT_mapdict], verbose=verbose)
 
-# Example usage and test function
-def example_usage():
-    """Demonstrate usage with example galaxy data."""
-    
-    # Example 1: Star-forming galaxy
-    sf_result = bpt_classify(
-        h_alpha=100.0, h_beta=30.0, oiii_5007=20.0, nii_6584=15.0,
-        sii_6717=10.0, sii_6731=8.0, oi_6300=2.0
-    )
-    print("Star-forming galaxy example:")
-    print(f"Classification: {sf_result['classification']}")
-    print(f"log([NII]/Hα): {sf_result['log_nii_ha']:.3f}")
-    print(f"log([OIII]/Hβ): {sf_result['log_oiii_hb']:.3f}")
-    print()
-    
-    # Example 2: Seyfert galaxy  
-    seyfert_result = bpt_classify(
-        h_alpha=80.0, h_beta=25.0, oiii_5007=150.0, nii_6584=40.0,
-        flux_errors={'h_alpha': 5.0, 'h_beta': 2.0, 'oiii_5007': 8.0, 'nii_6584': 3.0}
-    )
-    print("Seyfert galaxy example:")
-    print(f"Classification: {seyfert_result['classification']}")
-    print(f"Reliable: {seyfert_result['reliable']}")
-    print(f"Balmer decrement: {seyfert_result['balmer_decrement']:.2f}")
-
 
 if __name__ == "__main__":
-    example_usage()
+    print('BPT -m execution not functional')

@@ -86,6 +86,7 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
             velocity = -999
 
         if velocity == 0 or velocity == -999:
+            vmap_mask[w] = 4
             frac = 0
             velocity_err_upper = -999
             velocity_err_lower = -999
@@ -121,7 +122,7 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
     else:
         return vmap_dict
 
-        
+
 
 def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = None, scatter_lim = 30, error = True, equal_N = False, verbose = False):
     util.verbose_print(verbose, "Computing EW lims...")
@@ -171,7 +172,7 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         masked_errors = velocity_error[mask]
         
         if not equal_N:
-            ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.2)
+            ew_bins = np.arange(masked_ew.min(), masked_ew.max(), 0.1)
             med_ew = []
             velocity_stat = []
 
@@ -233,7 +234,8 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
     
     file_handler.write_thresholds(galname, ew_lims=ew_lims, overwrite=True)
     util.verbose_print(verbose, "Done.")
-    inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
+    #inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
+    plotter.velocity_threshold_plots(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
 
 
 
@@ -290,18 +292,17 @@ def apply_velocity_mask(galname, bin_method, vmap, vmap_error, vmap_mask = None,
 def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
 
-    cube = fits.open(datapath_dict['LOGCUBE'])
-    local = fits.open(datapath_dict['LOCAL'])
+    with fits.open(datapath_dict['LOGCUBE']) as cube:
+        binid = cube['BINID'].data[0]
+        
+    with fits.open(datapath_dict['LOCAL']) as local:
+        vmap = local['v_nai'].data
+        vmap_mask = local['v_nai_mask'].data
+        vmap_error = local['v_nai_error'].data
 
-    binid = cube['BINID'].data[0]
-    
-    vmap = local['v_nai'].data
-    vmap_mask = local['v_nai_mask'].data
-    vmap_error = local['v_nai_error'].data
-
-    doppler_param = local['mcmc_results'].data[2]
-    doppler_param_16 = local['mcmc_16th_perc'].data[2]
-    doppler_param_84 = local['mcmc_84th_perc'].data[2]
+        doppler_param = local['mcmc_results'].data[2]
+        doppler_param_16 = local['mcmc_16th_perc'].data[2]
+        doppler_param_84 = local['mcmc_84th_perc'].data[2]
 
     term_vmap = np.zeros_like(vmap)
     term_vmap_mask = np.zeros_like(vmap)
@@ -442,7 +443,7 @@ def main(args):
                                   gal_local_dir, verbose=args.verbose)
     
     # make the plots
-    plotter.map_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], gal_figures_dir, velocity_hduname, r"$v_{\mathrm{Na\ D}}$",
+    plotter.MAP_plotter(vmap_dict['Vel Map'], vmap_dict['Vel Map Mask'], gal_figures_dir, velocity_hduname, r"$v_{\mathrm{Na\ D}}$",
                         r"$\left( \mathrm{km\ s^{-1}} \right)$", args.galname, args.bin_method, vmin=-200, vmax=200, cmap='seismic')
 
 if __name__ == "__main__":
