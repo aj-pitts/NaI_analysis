@@ -69,7 +69,8 @@ def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     # rot_lambda = (v_rot / c) * halpha
     
     # i1, i2 = np.argmin(abs(restframe - (halpha - rot_lambda))), np.argmin(abs(restframe - (halpha + rot_lambda)))
-    i1, i2 = np.argmin(abs(restframe - 6586)), np.argmin(abs(restframe - 6605))
+    #i1, i2 = np.argmin(abs(restframe - 6586)), np.argmin(abs(restframe - 6605))
+    i1, i2 = np.argmin(abs(wavelengths - 6586)), np.argmin(abs(wavelengths - 6605))
 
     sliced_flux = flux_cube[i1:i2,:,:]
 
@@ -94,8 +95,10 @@ def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
     new_header['ELL'] = (float(ell), 'Ellipticity 1 - b/a')
     new_header['EBVGAL'] = (float(ebvgal), 'E(B-V) Milky Way dust reddening (mag)')
     new_header['EXTNAME'] = ('PRIMARY', 'FITS HDU extension name')
+    new_header.add_comment(f'Cube sliced by {wavelengths[i1]} - {wavelengths[i2]} angstrom')
     new_header.add_comment(f'Cube sliced by {restframe[i1]} - {restframe[i2]} angstrom rest-frame')
-    print(f'Cube sliced by {restframe[i1]} - {restframe[i2]} angstrom rest-frame')
+    print(f'Cube sliced by {wavelengths[i1]} - {wavelengths[i2]} angstrom')
+    print(f'Cube sliced by {restframe[i1]} - {restframe[i2]} angstrom rest-frame') 
 
     if not primary_only:
         raise ValueError("flux and ivar HDUList not currently supported in barolo.py")
