@@ -5,17 +5,121 @@ import argparse
 from modules import defaults, file_handler
 from scipy.stats import iqr
 from modules import util
+from astropy.wcs import WCS
+import astropy.units as u
 
-def get_args():
-    parser = argparse.ArgumentParser(description="A script to handle the HII region collaboration.")
 
-    parser.add_argument('galname', type=str, help="Input galaxy name.")
-    parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
-    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
 
-    return parser.parse_args()
+def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
+    util.sys_message('Preparing to create H_alpha CUBE from DAP outputs', color='yellow', verbose=verbose)
+    datapath_dict = file_handler.init_datapaths(galname, bin_method)
+    redshift = datapath_dict['Z']
 
-def make_ha_cube(galname, bin_method, primary_only=True, verbose=False):
+    # open the data and get flux, continuum model, wavelength arr, and flux header
+    with fits.open(datapath_dict['LOGCUBE']) as hdu:
+        flux = hdu['flux'].data
+        fluxheader = hdu['flux'].header
+        stellar_continuum = hdu['model'].data
+        wave = hdu['wave'].data
+
+    # open maps and get the stellar velocity, dispersion, and masks for both
+    with fits.open(datapath_dict['MAPS']) as hdul:
+        stellar_vel = hdul['stellar_vel'].data
+        stellar_vel_mask = hdul['stellar_vel_mask'].data
+
+        stellar_sigma = hdul['stellar_sigma'].data
+        stellar_sigma_mask = hdul['stellar_sigma_mask'].data
+
+    # handle stellar velocity masks
+    stellar_vel_mask = util.spec_mask_handler(stellar_vel_mask).astype(bool)
+    stellar_sigma_mask = util.spec_mask_handler(stellar_sigma_mask).astype(bool)
+
+    # calc mean vel dispersion
+    v_disp = np.mean(stellar_sigma[~stellar_sigma_mask]) #(iqr(stellar_vel.flatten(), rng=(0.001,99.999)))/2
+
+    # calc max and std of line-of-sight stellar velocity
+    v_rot = np.max(abs(stellar_vel[~stellar_vel_mask]))
+    v_rot_sigma = np.std(abs(stellar_vel[~stellar_vel_mask]))
+
+    util.sys_message(f'Velocity Rotation (max) {v_rot}', color='yellow', verbose=verbose)
+    util.sys_message(f'Velocity Dispersion (mean) {v_disp}', color='yellow', verbose=verbose)
+
+
+    # if a wavelength slice is input, handle it
+    if wave_slice is not None:
+        if not isinstance(wave_slice, tuple) or len(wave_slice) != 2:
+            raise ValueError(f"Input `wave_slice` must be a tuple of two wavelength values defining wavelength range boundaries")
+        if wave_slice[1] <= wave_slice[0]:
+            raise ValueError(f"values of `wave_slice` must be in ascending order")
+        i1, i2 = np.argmin(abs(wave - wave_slice[0])), np.argmin(abs(wave - wave_slice[1]))
+
+        wave = wave[i1:i2]
+        flux_select = flux[i1:i2, :, :]
+        stellar_continuum_select = stellar_continuum[i1:i2, :, :]
+
+    # if no wave slice input, slice by the v_rot max around observed halpha:
+    else:
+        halpha = 6562.8 * (1 + redshift) # angstrom, observed
+        c = 2.998e5
+        rot_lambda = (v_rot / c) * halpha
+        i1, i2 = np.argmin(abs(wave -  halpha - rot_lambda)), np.argmin(abs(wave - halpha + rot_lambda))
+
+        wave = wave[i1:i2]
+        flux_select = flux[i1:i2, :, :]
+        stellar_continuum_select = stellar_continuum[i1:i2, :, :]
+
+    # subtract the stellar continuum from the flux
+    flux_subtract = flux_select - stellar_continuum_select
+    
+    util.sys_message(f'Slicing cube to {wave[0]} - {wave[-1]} angstrom; '
+          f'rest-frame : {wave[0] / (1+redshift)} - {wave[-1] / (1+redshift)} angstrom', color='yellow', verbose=verbose)
+    
+    util.sys_message(f"New Cube DIMS: {flux_subtract.shape}", color='yellow', verbose=verbose)
+    # copy the flux header and update the wavelength WCS values
+    newheader = fluxheader.copy()
+
+    newheader['NAXIS3'] = (len(wave), 'Number of wavelength pixels')
+    newheader['CRVAL3'] = (wave[0], '[angstrom] Coordinate value at reference point')
+    newheader['CRPIX3'] = (1, 'Pixel coordinate of reference point')
+    newheader['PC3_3'] = np.diff(wave)[0], 'Coordinate transformation matrix element'
+    newheader['CDELT3'] = (1.0, '[angstrom] Coordinate increment at reference point')
+    newheader['CTYPE3'] = ('WAVE-LOG', 'Vacuum wavelength (logarithmic)')
+    newheader['CUNIT3'] = 'angstrom'
+    newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[angstrom] random error in coordinate')
+
+    # get galaxy info from config file and add galaxy info into header
+
+    configuration = file_handler.parse_config(datapath_dict['CONFIG'], verbose=verbose)
+    pa = configuration['pa']
+    reff = configuration['reff']
+    ebvgal = configuration['ebvgal']
+    ell = configuration['ell']
+
+    newheader['V_DISP'] = (v_disp, 'Mean velocity dispersion (km/s)')
+    newheader['V_ROT'] = (v_rot, 'Maximum rotational velocity (km/s)')
+    newheader['VROT_STD'] = (v_rot_sigma, 'Standard dev of rotational velocity (km/s)')
+    newheader['REDSHIFT'] = (redshift, 'Systemic redshift')
+    newheader['PA'] = (float(pa), 'Position angle (deg)')
+    newheader['R_EFF'] = (float(reff), 'Effective radius (arcsec?)')
+    newheader['ELL'] = (float(ell), 'Ellipticity 1 - b/a')
+    newheader['EBVGAL'] = (float(ebvgal), 'E(B-V) Milky Way dust reddening (mag)')
+    newheader['EXTNAME'] = ('PRIMARY', 'FITS HDU extension name')
+    newheader.add_comment(f'Cube sliced by {wave[0]} - {wave[-1]} angstrom')
+    newheader.add_comment(f'Cube sliced by {wave[0] / (1+redshift)} - {wave[-1] / (1+redshift)} angstrom (rest)')
+
+    # write the fits data
+    local_data_path = defaults.get_data_path('local')
+    barolo_path = os.path.join(local_data_path, '3dbarolo')
+    os.makedirs(barolo_path, exist_ok=True)
+    outpath = os.path.join(barolo_path, f'{galname}-{bin_method}-Halpha_cube.fits')
+
+    hdul = fits.PrimaryHDU(data=flux_subtract, header=newheader)
+    hdul.writeto(outpath, overwrite=True)
+    util.verbose_print(verbose, f"BBarolo H alpha cube written to {outpath}")
+
+    
+
+def cube_from_ESO(galname, bin_method, wave_slice = None, primary_only=True, verbose=False):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
     redshift = datapath_dict['Z']
     mapfile = datapath_dict['MAPS']
@@ -124,16 +228,33 @@ def analysis_run(galname, bin_method, verbose = False):
     local_data_path = defaults.get_data_path('local')
     barolo_path = os.path.join(local_data_path, '3dbarolo')
     outpath = os.path.join(barolo_path, f'{galname}-{bin_method}-Halpha_cube.fits')
+    util.sys_warnings(f"barolo.py currently not functioning.... skipping")
+    return
     if not os.path.exists(barolo_path) or not os.path.isfile(outpath):
         make_ha_cube(galname, bin_method, verbose=verbose)
     else:
         print('Barolo cube exists. Skipping...')
 
+
+def get_args():
+    parser = argparse.ArgumentParser(description="A script to handle the HII region collaboration.")
+
+    parser.add_argument('galname', type=str, help="Input galaxy name.")
+    parser.add_argument('bin_method', type=str, help="Input DAP spatial binning method.")
+    parser.add_argument('-v','--verbose', help = "Print verbose outputs (default: False)", action='store_true', default = False)
+    parser.add_argument('--eso', help = "Flag to specify creating the Halpha cube from the reduced ESO cube (default: False). If False," \
+    " uses DAP cube instead", action='store_true', default=False)
+
+    return parser.parse_args()
+
 def main(args):
     galname = args.galname
     bin_method = args.bin_method
     verbose = args.verbose
-    make_ha_cube(galname, bin_method, verbose=verbose)
+    if args.eso:
+        cube_from_ESO(galname, bin_method, verbose=verbose)
+    else:
+        cube_from_DAP(galname, bin_method, wave_slice=(6585, 6605), verbose=verbose)
 
 
 if __name__ == "__main__":
