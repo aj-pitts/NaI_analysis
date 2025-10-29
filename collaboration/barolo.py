@@ -176,10 +176,8 @@ def cube_from_ESO(galname, bin_method, wave_slice = None, primary_only=True, ver
     naxis = header['naxis3']
     wavelengths = crval + (np.arange(naxis) - (crpix - 1)) * deltaval
     
-    print(crval, crpix, deltaval)
     restframe = wavelengths / (1 + redshift)
 
-    return
     if wave_slice is not None:
         if not isinstance(wave_slice, tuple) or len(wave_slice) != 2:
             raise ValueError(f"Input `wave_slice` must be a tuple of two wavelength values defining wavelength range boundaries")
@@ -246,10 +244,10 @@ def analysis_run(galname, bin_method, verbose = False):
     local_data_path = defaults.get_data_path('local')
     barolo_path = os.path.join(local_data_path, '3dbarolo')
     outpath = os.path.join(barolo_path, f'{galname}-{bin_method}-Halpha_cube.fits')
-    util.sys_warnings(f"barolo.py currently not functioning.... skipping")
-    return
+    #util.sys_warnings(f"barolo.py currently not functioning.... skipping")
+
     if not os.path.exists(barolo_path) or not os.path.isfile(outpath):
-        make_ha_cube(galname, bin_method, verbose=verbose)
+        cube_from_DAP(galname, bin_method, wave_slice=(6585, 6605), verbose=verbose)
     else:
         print('Barolo cube exists. Skipping...')
 
