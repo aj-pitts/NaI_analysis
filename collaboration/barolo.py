@@ -19,7 +19,7 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
     with fits.open(datapath_dict['LOGCUBE']) as hdu:
         flux = hdu['flux'].data
         fluxheader = hdu['flux'].header
-        stellar_continuum = hdu['model'].data
+        stellar_continuum = hdu['stellar'].data
         wave = hdu['wave'].data
 
     # open maps and get the stellar velocity, dispersion, and masks for both
@@ -53,10 +53,6 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
             raise ValueError(f"values of `wave_slice` must be in ascending order")
         i1, i2 = np.argmin(abs(wave - wave_slice[0])), np.argmin(abs(wave - wave_slice[1]))
 
-        wave = wave[i1:i2]
-        flux_select = flux[i1:i2, :, :]
-        stellar_continuum_select = stellar_continuum[i1:i2, :, :]
-
     # if no wave slice input, slice by the v_rot max around observed halpha:
     else:
         halpha = 6562.8 * (1 + redshift) # angstrom, observed
@@ -64,9 +60,9 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
         rot_lambda = (v_rot / c) * halpha
         i1, i2 = np.argmin(abs(wave -  halpha - rot_lambda)), np.argmin(abs(wave - halpha + rot_lambda))
 
-        wave = wave[i1:i2]
-        flux_select = flux[i1:i2, :, :]
-        stellar_continuum_select = stellar_continuum[i1:i2, :, :]
+    wave = wave[i1:i2]
+    flux_select = flux[i1:i2, :, :]
+    stellar_continuum_select = stellar_continuum[i1:i2, :, :]
 
     # subtract the stellar continuum from the flux
     flux_subtract = flux_select - stellar_continuum_select
@@ -79,13 +75,24 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
     newheader = fluxheader.copy()
 
     newheader['NAXIS3'] = (len(wave), 'Number of wavelength pixels')
-    newheader['CRVAL3'] = (wave[0], '[angstrom] Coordinate value at reference point')
+    newheader['CRVAL3'] = (wave[0], '[Angstrom] Coordinate value at reference point')
     newheader['CRPIX3'] = (1, 'Pixel coordinate of reference point')
     newheader['PC3_3'] = np.diff(wave)[0], 'Coordinate transformation matrix element'
-    newheader['CDELT3'] = (1.0, '[angstrom] Coordinate increment at reference point')
+    newheader['CDELT3'] = (1.0, '[Angstrom] Coordinate increment at reference point')
     newheader['CTYPE3'] = ('WAVE-LOG', 'Vacuum wavelength (logarithmic)')
-    newheader['CUNIT3'] = 'angstrom'
-    newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[angstrom] random error in coordinate')
+    newheader['CUNIT3'] = 'Angstrom'
+    newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[Angstrom] random error in coordinate')
+
+    # restructure header using WCS
+    wcs = WCS(header=newheader)
+    newheader = wcs.to_header()
+
+    # remove PC and CDELT, revert back to CD
+    for i in range(1, 4):
+        newheader[f'CD{i}_{i}'] = (newheader[f'PC{i}_{i}'], newheader.comments[f'PC{i}_{i}'])
+        del newheader[f'PC{i}_{i}']
+        del newheader[f'CDELT{i}']
+
 
     # get galaxy info from config file and add galaxy info into header
 
@@ -157,6 +164,8 @@ def cube_from_ESO(galname, bin_method, wave_slice = None, primary_only=True, ver
     
     util.verbose_print(verbose, f"Creating H alpha cube from {muse_cube_path}")
 
+    print(muse_cube_path)
+
     with fits.open(muse_cube_path) as data:
         header = data['data'].header
         flux_cube = data['data'].data
@@ -167,14 +176,23 @@ def cube_from_ESO(galname, bin_method, wave_slice = None, primary_only=True, ver
     naxis = header['naxis3']
     wavelengths = crval + (np.arange(naxis) - (crpix - 1)) * deltaval
     
+    print(crval, crpix, deltaval)
     restframe = wavelengths / (1 + redshift)
-    # halpha = 6562.8 # angstrom
-    # c = 2.998e5
-    # rot_lambda = (v_rot / c) * halpha
-    
-    # i1, i2 = np.argmin(abs(restframe - (halpha - rot_lambda))), np.argmin(abs(restframe - (halpha + rot_lambda)))
-    #i1, i2 = np.argmin(abs(restframe - 6586)), np.argmin(abs(restframe - 6605))
-    i1, i2 = np.argmin(abs(wavelengths - 6586)), np.argmin(abs(wavelengths - 6605))
+
+    return
+    if wave_slice is not None:
+        if not isinstance(wave_slice, tuple) or len(wave_slice) != 2:
+            raise ValueError(f"Input `wave_slice` must be a tuple of two wavelength values defining wavelength range boundaries")
+        if wave_slice[1] <= wave_slice[0]:
+            raise ValueError(f"values of `wave_slice` must be in ascending order")
+        i1, i2 = np.argmin(abs(wavelengths - wave_slice[0])), np.argmin(abs(wavelengths - wave_slice[1]))
+
+    else:
+        halpha = 6562.8 * (1 + redshift)
+        c = 2.998e5
+        rot_lambda = (v_rot / c) * halpha
+        i1, i2 = np.argmin(abs(wavelengths -  halpha - rot_lambda)), np.argmin(abs(wavelengths - halpha + rot_lambda))
+        
 
     sliced_flux = flux_cube[i1:i2,:,:]
 
