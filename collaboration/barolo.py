@@ -78,14 +78,14 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
     newheader['CRVAL3'] = (wave[0], '[Angstrom] Coordinate value at reference point')
     newheader['CRPIX3'] = (1, 'Pixel coordinate of reference point')
     newheader['PC3_3'] = np.diff(wave)[0], 'Coordinate transformation matrix element'
-    newheader['CDELT3'] = (1.0, '[Angstrom] Coordinate increment at reference point')
+    #newheader['CDELT3'] = (1.0, '[Angstrom] Coordinate increment at reference point')
     newheader['CTYPE3'] = ('WAVE-LOG', 'Vacuum wavelength (logarithmic)')
     newheader['CUNIT3'] = 'Angstrom'
     newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[Angstrom] random error in coordinate')
 
     # restructure header using WCS
-    wcs = WCS(header=newheader)
-    newheader = wcs.to_header()
+    # wcs = WCS(header=newheader)
+    # newheader = wcs.to_header()
 
     # remove PC and CDELT, revert back to CD
     for i in range(1, 4):
@@ -123,6 +123,7 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
     hdul = fits.PrimaryHDU(data=flux_subtract, header=newheader)
     hdul.writeto(outpath, overwrite=True)
     util.verbose_print(verbose, f"BBarolo H alpha cube written to {outpath}")
+
 
     
 
