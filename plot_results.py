@@ -47,6 +47,10 @@ def plot_local_maps(galname, bin_method, verbose=False):
         return f"{galname}-{bin_method}-{keyword}.pdf"
     def histname(keyword):
         return f"{galname}-{bin_method}-{keyword}_HIST.pdf"
+    # redshift
+    plotter.MAP_plotter(hdul['redshift'].data, r'$z$', maps_directory, figname('REDSHIFT'), mask_data=hdul['redshift_mask'].data, verbose=verbose, 
+                        **dict(cmap=util.seaborn_palette('seismic')))
+    plotter.HIST_plotter(hdul['redshift'].data, hdul['spatial_bins'].data, r'$z$', hist_directory, histname('REDSHIFT'), mask_data=hdul['redshift_mask'].data, verbose=verbose)
 
     # Na D S/N
     plotter.MAP_plotter(hdul['nai_snr'].data, r'$S/N_{\mathrm{Na\ D}}$', maps_directory, figname('NAI_SNR'), verbose=verbose, 
@@ -66,15 +70,17 @@ def plot_local_maps(galname, bin_method, verbose=False):
                         mask_data = hdul['ew_noem_mask'].data, verbose=verbose)
     
     # Star Formation Rate Surface Density
-    plotter.MAP_plotter(hdul['sfrsd'].data, r"$\mathrm{log \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$", maps_directory,
+    plotter.MAP_plotter(hdul['sfrsd'].data, r"$\mathrm{log \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$", maps_directory,
                         figname('SFRSD'), mask_data = hdul['sfrsd_mask'].data, verbose=verbose, **dict(cmap='rainbow', vmin=-2.5, vmax=0,))
-    plotter.HIST_plotter(hdul['sfrsd'].data, hdul['spatial_bins'].data, r"$\mathrm{log \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}\ spaxel^{-1}} \right)$", hist_directory,
+    plotter.HIST_plotter(hdul['sfrsd'].data, hdul['spatial_bins'].data, r"$\mathrm{log \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$", hist_directory,
                         histname('SFRSD'), mask_data = hdul['sfrsd_mask'].data, verbose=verbose)
     
     # Na D centroid velocity
-    plotter.MAP_plotter(hdul['v_nai'].data, r"$v_{\mathrm{Na\ D}}\ \left( \mathrm{km\ s^{-1}} \right)$", maps_directory, figname('V_NaI'),
+    plotter.MAP_plotter(hdul['v_nai'].data, r"$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$", maps_directory, figname('V_NaI'),
                         mask_data=hdul['v_nai_mask'].data, verbose=verbose, **dict(vmin=-250, vmax=250, cmap='seismic'))
-    plotter.HIST_plotter(hdul['v_nai'].data, hdul['spatial_bins'].data, r"$v_{\mathrm{Na\ D}}\ \left( \mathrm{km\ s^{-1}} \right)$", hist_directory, histname('V_NaI'),
+    plotter.MAP_plotter(hdul['v_nai'].data, r"$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$", maps_directory, figname('V_NaI_unmasked'),
+                        mask_data=(hdul['v_nai'].data == -999),verbose=verbose, **dict(vmin=-250, vmax=250, cmap='seismic'))
+    plotter.HIST_plotter(hdul['v_nai'].data, hdul['spatial_bins'].data, r"$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$", hist_directory, histname('V_NaI'),
                         mask_data=hdul['v_nai_mask'].data, verbose=verbose)
     
     # extinction
@@ -82,24 +88,28 @@ def plot_local_maps(galname, bin_method, verbose=False):
 
     plotter.plot_BPT_MAP(galname, bin_method, verbose=verbose)
 
+    # metallicity
+    # plotter.MAP_plotter(hdul['metallicity'].data, r"$12 + \mathrm{log\ O/H}$", maps_directory, figname('METALLICITY'),
+    #                     mask_data=hdul['metallicity_mask'].data, verbose=verbose, **dict(cmap='rainbow'))
+    hdul.close()
 
 def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, contours = True,
                     radius_cbar = False, hists = False, verbose = False):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
     local_maps_path = datapath_dict['LOCAL']
 
-    hdul = fits.open(local_maps_path)
+    with fits.open(local_maps_path) as hdul:
+        spatial_bins = hdul['SPATIAL_BINS'].data
+        radius_map = hdul['RADIUS'].data
 
-    spatial_bins = hdul['SPATIAL_BINS'].data
-    radius_map = hdul['RADIUS'].data
+        vmap = hdul['V_NaI'].data
+        vmap_mask = hdul['V_NaI_MASK'].data
+        vmap_error = np.mean(hdul['V_NaI_ERROR'].data, axis=0)
+        vfrac = hdul['v_nai_frac'].data
 
-    vmap = hdul['V_NaI'].data
-    vmap_mask = hdul['V_NaI_MASK'].data
-    vmap_error = np.mean(hdul['V_NaI_ERROR'].data, axis=0)
-
-    sfrmap = hdul['SFRSD'].data
-    sfrmap_mask = hdul['SFRSD_MASk'].data
-    sfrmap_error = hdul['SFRSD_ERROR'].data
+        sfrmap = hdul['SFRSD'].data
+        sfrmap_mask = hdul['SFRSD_MASk'].data
+        sfrmap_error = hdul['SFRSD_ERROR'].data
 
     ### TODO HANDLE ASYMMETRIC ERRORS
     ## mask out values
@@ -183,8 +193,8 @@ def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, cont
     #cbar = plt.colorbar(sm, ax=ax, pad=0.01)
     #cbar.set_label(label=r"$R / R_e$", rotation=270, labelpad=21)
 
-    ax.set_xlim(-2.6,-.1)
-    ax.set_xlabel(r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$')
+    ax.set_xlim(min(np.min(sfrs_i), np.min(sfrs_o)),max(np.max(sfrs_i), np.max(sfrs_o)))
+    ax.set_xlabel(r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$')
     ax.set_ylabel(r'$v_{\mathrm{Na\ D}}\ \left( \mathrm{km\ s^{-1}} \right)$')
     ax.set_ylim(-350, 350)
 
@@ -238,7 +248,7 @@ def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, cont
 
         # Set plot labels and title
         fig.update_layout(
-            xaxis_title=r"$ \mathrm{log\ \Sigma_{SFR}} \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$",
+            xaxis_title=r"$ \mathrm{log\ \Sigma_{SFR}} \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$",
             yaxis_title=r"$ v_{\mathrm{Na\ D}}\ \left( \mathrm{km\ s^{-1}} \right) $",
             width=600,
             height=600,
@@ -246,7 +256,7 @@ def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, cont
         )
 
         fig.update_xaxes(
-            range=[-2.5, 0],
+            range=[np.min(sfrs), np.max(sfrs)],
             linecolor='black',
             linewidth=2,
             showline=True,
@@ -260,7 +270,7 @@ def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, cont
         )
 
         fig.update_yaxes(
-            range=[-250, 250],
+            range=[-350, 350],
             linecolor='black',
             linewidth=2,
             showline=True,
@@ -278,7 +288,7 @@ def velocity_vs_sfr(galname, bin_method, output_dir = None, pearson = True, cont
         verbose_print(verbose, f"Velocity vs SFR with contours saved to {outfil}")
 
 
-def terminal_velocity(galname, bin_method, output_dir = None, radius_cbar = False, power_law = True, verbose = True):
+def terminal_velocity(galname, bin_method, show = False, save = True, output_dir = None, radius_cbar = False, power_law = True, verbose = True):
     # open local maps fits file
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
     local_maps_path = datapath_dict['LOCAL']
@@ -342,6 +352,7 @@ def terminal_velocity(galname, bin_method, output_dir = None, radius_cbar = Fals
 
     fig, ax = plt.subplots(figsize=(7,7))
 
+    xmin, xmax = sfrs.min(), sfrs.max()
     items = zip(terminal_velocities, sfrs, colors)
     #iterator = tqdm(items, desc="Drawing Terminal Velocity vs SFR figure") if verbose else items
     for tv, sfr, c in items:
@@ -363,8 +374,7 @@ def terminal_velocity(galname, bin_method, output_dir = None, radius_cbar = Fals
             return scale * sfr ** power
         
         popt, pcov = curve_fit(wind_model, 10**(sfrs), terminal_velocities, p0=(100, 0.1))
-
-        modsfr = np.logspace(-3, 0, 1000)
+        modsfr = np.logspace(sfrs.min(), 0, 1000)
         modv = wind_model(modsfr, popt[0], popt[1])
 
         #model_label = rf'$v = {popt[0]:.0f}\ \left( \Sigma_{{\mathrm{{SFR}}}} \right)^{{{popt[1]:.2f}}}$'
@@ -375,21 +385,27 @@ def terminal_velocity(galname, bin_method, output_dir = None, radius_cbar = Fals
 
         ax.legend(frameon=False, fontsize=17)
 
-    ax.set_xlim(-3,0)
-    ax.set_xlabel(r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$')
+    ax.set_xlim(np.floor(xmin*10)/10,np.ceil(xmax*10)/10)
+    ax.set_xlabel(r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$')
     ax.set_ylabel(r'$ v_{\mathrm{out,\ max}}\ \left( \mathrm{km\ s^{-1}} \right)$')
 
-    if output_dir is None:
-        results_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
-        output_dir = os.path.join(results_dir, 'scatter')
-        util.check_filepath(output_dir, verbose=verbose)
+    if save:
+        if output_dir is None:
+            results_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
+            output_dir = os.path.join(results_dir, 'scatter')
+            util.check_filepath(output_dir, verbose=verbose)
 
-    outfil = os.path.join(output_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
-    plt.savefig(outfil, bbox_inches='tight')
-    verbose_print(verbose, f"Terminal velocity vs SFR fig saved to {outfil}")    
+        outfil = os.path.join(output_dir, f'{galname}-{bin_method}-terminalv_vs_sfr.pdf')
+        plt.savefig(outfil, bbox_inches='tight')
+        verbose_print(verbose, f"Terminal velocity vs SFR fig saved to {outfil}")    
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
-def plot_galaxy_sample(show=True, save=False, verbose=False):
+def plot_galaxy_sample(highlight_gal = None, show=True, save=False, verbose=False):
     from scipy.ndimage import gaussian_filter
     paper_figures_dir = defaults.get_default_path('figures', ensure_exists=True)
 
@@ -412,6 +428,7 @@ def plot_galaxy_sample(show=True, save=False, verbose=False):
     mad = ascii.read(MADpath)
     MADlogM = mad['col6']
     MADlogSFR = np.log10(mad['col7'])
+
     
     sdssind = (mpajhu['LGM_TOT_P50'] >= 7.0) & (mpajhu['SFR_TOT_P50'] > -10.0)
     mpajhu_select = mpajhu[sdssind] #SDSS (Brinchmann et al. 2004)
@@ -464,6 +481,11 @@ def plot_galaxy_sample(show=True, save=False, verbose=False):
     ax.scatter(mpajhu_select['LGM_TOT_P50'], mpajhu_select['SFR_TOT_P50'], color='lightgray', s=.5, alpha = .5, zorder=0, rasterized=True)
 
     ax.scatter(MADlogM, MADlogSFR, marker='D', facecolor='violet', edgecolors='magenta', linewidths=.5, s=10, zorder=10)
+
+    if highlight_gal is not None:
+        row = np.argwhere(mad['col1'] == highlight_gal)
+        ax.scatter(MADlogM[row], MADlogSFR[row], marker='D', facecolor="#53AFFF", edgecolors="#063CFF", linewidths=1, zorder=11, s=35)# facecolor='violet', edgecolors='magenta', linewidths=.5, s=10, zorder=10)
+        ax.scatter(MADlogM[row], MADlogSFR[row], marker='*', color="#E4CA00", linewidths=0.5, zorder=11, s=5)
     ax.set_xlabel(r'$\mathrm{log\ M_{\star} / M_{\odot}}$')
     ax.set_ylabel(r'$\mathrm{log\ SFR\ \left( M_{\odot}\ yr^{-1} \right)}$')
 
@@ -476,7 +498,7 @@ def plot_galaxy_sample(show=True, save=False, verbose=False):
 
 
 
-def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False, save = True, verbose = False):
+def terminal_velocity_subplots(galname, show = False, save = True, verbose = False):
     paper_figures_dir = defaults.get_default_path('figures', ensure_exists=True)
     bin_methods = ['SQUARE0.6', 'SQUARE2.0']
     datadict = {}
@@ -484,7 +506,6 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
     base_w, base_h = plt.rcParams["figure.figsize"]
     fig, axes = plt.subplots(1, 2, figsize=(base_w*2, base_h))
 
-    colors = []
     for bin_method, ax in zip(bin_methods, axes):
         datapaths = file_handler.init_datapaths(galname, bin_method)
         with fits.open(datapaths['LOCAL']) as hdul:
@@ -496,18 +517,18 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
 
             vterm = hdul['V_MAX_OUT'].data
             vterm_mask = hdul['V_MAX_OUT_MASK'].data
-            #vterm_error = np.mean(hdul['V_MAX_OUT_ERROR'].data, axis=0)
 
-            vcen = hdul['V_NAI'].data
+            vfrac = hdul['v_nai_frac'].data
 
-        datamask = sfrmap_mask + vterm_mask 
-        
-        if outflow_bins_only:
-            datamask += (vcen >= 0).astype(int)
+        datamask = np.logical_or(sfrmap_mask.astype(bool), vterm_mask.astype(bool))
+        fracmask = vfrac > -0.95
+        combined_mask = datamask | fracmask | (sfrmap == -999) | (vterm >400)
 
-        datadict[bin_method] = {'sfr':sfrmap, 'vterm':vterm, 'bins':spatial_bins}
+        data = {'sfr':sfrmap, 'vterm':vterm, 'bins':spatial_bins}
+        datadict[bin_method] = data
 
-        good_data = util.extract_unique_binned_values(datadict[bin_method], spatial_bins, datamask)
+        good_data = util.extract_unique_binned_values(data, spatial_bins, mask = combined_mask)
+        xmin, xmax = good_data['sfr'].min(), good_data['sfr'].max()
 
         ax.scatter(good_data['sfr'], good_data['vterm'], marker='o', s=15, fc = '#0063ff', ec = '#3327e7', alpha=0.75)
 
@@ -518,10 +539,10 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
         perr = np.sqrt(np.diag(pcov))
 
         scale, power = popt
-        err_scale,  err_power = perr
+        err_scale, err_power = perr
         cov_scalepower = pcov[0,1]
         
-        modsfr = np.logspace(-3, 0, 1000)
+        modsfr = np.logspace(xmin - 1, xmax + 1, 1000)
         modv = wind_model(modsfr, scale, power)
 
         dy_dscale = modsfr ** power
@@ -529,7 +550,7 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
 
         error_v = np.sqrt((dy_dscale * err_scale)**2 + (dy_dpower * err_power)**2 + 2 * cov_scalepower * dy_dscale * dy_dpower)
 
-        model_label = rf'$v \propto \Sigma_{{\mathrm{{SFR}}}} ^{{{popt[1]:.2f} \pm {np.sqrt(perr[1]):.2f}}}$'
+        model_label = rf'$v \propto \Sigma_{{\mathrm{{SFR}}}} ^{{{popt[1]:.2f} \pm {err_power:.2f}}}$'
         ax.plot(np.log10(modsfr), modv, 'k', linestyle='dashed', 
                 label=model_label)
         ax.fill_between(np.log10(modsfr), modv - error_v, modv + error_v, color='#ce0014', alpha=0.3)
@@ -538,7 +559,7 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
         val = round(pearson_result[0], 2)
         #ax.legend(frameon=False, fontsize=16, handlelength=0.75)
 
-        ax.set_xlim(-3,0)
+        ax.set_xlim(np.floor(xmin * 10)/10,np.ceil(xmax * 10)/10)
         
 
         bin_string = bin_method[-3:]
@@ -551,7 +572,7 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
         ax.set_box_aspect(1)
     
     axes[0].set_ylabel(r'$ v_{\mathrm{out,\ max}}\ \left( \mathrm{km\ s^{-1}} \right)$')
-    fig.text(0.5, 0, r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$', va='center', ha='center')
+    fig.text(0.5, 0, r'$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$', va='center', ha='center')
     if save:
         fname = f"{galname}_TERMINALVELOCITY.pdf"
         figout = os.path.join(paper_figures_dir, fname)
@@ -564,7 +585,7 @@ def terminal_velocity_subplots(galname, outflow_bins_only = False, show = False,
     
 
 
-def make_paper_plots(galname, show = False, save = True, verbose = False):
+def make_paper_plots(galname, highlight_gal = None, show = False, save = True, verbose = False):
     paper_figures_dir = defaults.get_default_path('figures', ensure_exists=True)
 
     bin_methods = ['SQUARE0.6', 'SQUARE2.0']
@@ -656,11 +677,13 @@ def make_plots(galname, bin_method, paper = False, verbose = False):
     plot_local_maps(galname, bin_method, verbose=verbose)
     velocity_vs_sfr(galname, bin_method, pearson=True, contours=True, hists=True, verbose=verbose)
     terminal_velocity(galname, bin_method, power_law=True, verbose=verbose)
-    plotter.gas_properties_scatter(galname, bin_method, verbose=verbose)
+    plotter.gas_properties_scatter(galname, bin_method, pearson=True, verbose=verbose)
+    plotter.incidence(galname, bin_method, verbose=verbose)
 
     if paper:
         make_paper_plots(galname, verbose=verbose)
-        plotter.plot_bin_profiles(galname, bin_method, verbose=verbose)
+        #plotter.plot_bin_profiles(galname, bin_method, verbose=verbose)
+        #plotter.bin_profiles(galname, bin_method, show_vmax_out=False)
         plotter.enhanced_corner_plotter(galname, bin_method, [950], verbose=verbose)
 
     verbose_print(verbose, 'Done.')

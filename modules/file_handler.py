@@ -548,8 +548,10 @@ def reorder_hdu(hdul):
         'V_MAX_OUT', 'V_MAX_OUT_MASK', 'V_MAX_OUT_ERROR',
         'MCMC_RESULTS', 'MCMC_16TH_PERC', 'MCMC_84TH_PERC',
         'HII',
-        'BPT'
+        'BPT',
+        'METALLICITY', 'METALLICITY_MASK','METALLICITY_ERROR'
     ]
+
     primary_hdu = hdul[0]
     sorted_hdus = [primary_hdu]
     sorted_hdus += sorted(
@@ -658,41 +660,45 @@ def clean_ini_file(input_file, overwrite=False):
     print("Done.")
 
 
-def threshold_parser(galname, bin_method, require_ew=True):
+def threshold_parser(galname, bin_method, require_ew = False):
     thresholds_path = os.path.join(defaults.get_default_path('config'), 'thresholds.yaml')
     if not os.path.isfile(thresholds_path):
         raise ValueError(f"File not found: {thresholds_path}")
     
     with open(thresholds_path, "r") as f:
         thresholds_file = yaml.safe_load(f)
-        
-    # Always try to get SNR bins
+
+    thresholds = thresholds_file['thresholds']
+    
+    # attempt to get galaxy info, use default if not available
+
+    default_entry = thresholds['default'][bin_method]
     try:
-        snr_edges = thresholds_file['snr_bins'][bin_method]
+        snr_edges = thresholds[galname][bin_method]['snr_edges']
     except KeyError:
-        util.sys_warnings(f"Binning method '{bin_method}' not found in SNR bins...\nUsing SNR bins for SQUARE0.6")
-        snr_edges = thresholds_file['snr_bins']['SQUARE0.6']
+        util.sys_warnings(f"{galname}-{bin_method} SNR bins not found. Using default.")
+        snr_edges = default_entry['snr_edges']
+    
+    try:
+        ew_thresholds = thresholds[galname][bin_method]['ew_thresholds']
+    except KeyError:
+        if not require_ew:
+            ew_thresholds = None
+        else:
+            util.sys_warnings(f"{galname}-{bin_method} ew_thresholds not found. Using default.")
+            ew_thresholds = default_entry['ew_thresholds']
 
     # Convert edges to floats
     snr_edges = [float('inf') if s == 'inf' else float(s) for s in snr_edges]
     sn_lims = list(zip(snr_edges[:-1], snr_edges[1:]))
 
-    # Safely get EW thresholds dictionary (handle None or missing key)
-    ew_thresholds = thresholds_file.get('ew_thresholds') or {}
+    if ew_thresholds is None:
+        return {
+            "sn_lims": sn_lims,
+            "ew_lims": None,
+        }
 
-    # Then look for this galaxy
-    ew_raw = ew_thresholds.get(galname, None)
-    if ew_raw is None:
-        if require_ew:
-            util.sys_warnings(f"No EW thresholds found for galaxy '{galname}'.")
-            return None
-        else:
-            return {
-                "sn_lims": sn_lims,
-                "ew_lims": None,
-            }
-
-    ew_lims = [float('inf') if ew == 'inf' else float(ew) for ew in ew_raw]
+    ew_lims = [float('inf') if ew == 'inf' else float(ew) for ew in ew_thresholds]
 
     if len(sn_lims) != len(ew_lims):
         raise ValueError(f"Mismatch: {len(sn_lims)} S/N bins but {len(ew_lims)} EW limits.")
@@ -702,7 +708,7 @@ def threshold_parser(galname, bin_method, require_ew=True):
         "ew_lims": ew_lims
     }
 
-def write_thresholds(galname, ew_lims, overwrite=True, verbose=False):
+def write_thresholds(galname, bin_method, ew_lims, overwrite=True, verbose=False):
     def sanitize_thresholds(array):
         return [float(x) if np.isfinite(x) else float('inf') for x in np.asarray(array)]
     
@@ -710,21 +716,33 @@ def write_thresholds(galname, ew_lims, overwrite=True, verbose=False):
     with open(thresholds_path, "r") as f:
         data = yaml.safe_load(f) or {}
 
-    if not isinstance(data.get("ew_thresholds"), dict):
-        data["ew_thresholds"] = {}
+    # check if .yaml file has initial structure
+    if 'thresholds' not in data or not isinstance(data['thresholds'], dict):
+        data['thresholds'] = {}
 
-    # Force clean Python-native types
+    thresholds = data['thresholds']
+
+    # check if galaxy is present in the file
+    if galname not in thresholds:
+        thresholds[galname] = {}
+    if bin_method not in thresholds[galname]:
+        thresholds[galname][bin_method] = {}
+    
+    # isolate the current entry
+    entry = thresholds[galname][bin_method]
+
     ew_lims = sanitize_thresholds(ew_lims)
 
-    if galname not in data["ew_thresholds"] or not data["ew_thresholds"][galname]:
-        data["ew_thresholds"][galname] = ew_lims
+    if "ew_thresholds" not in entry or not entry["ew_thresholds"]:
+        entry["ew_thresholds"] = ew_lims
     else:
         if not overwrite:
-            print(f"{galname} already has EW lims of {data['ew_thresholds'][galname]}")
+            util.sys_message(f"{galname}-{bin_method} already has EW thresholds!", status='WARN', color='red')
         else:
-            util.verbose_print(verbose, f"Overwriting thresholds for {galname}")
-            data["ew_thresholds"][galname] = ew_lims
+            util.sys_message(f"Overwriting thresholds for {galname}-{bin_method}", status='WARN', color='yellow', verbose=verbose)
+            entry["ew_thresholds"] = ew_lims
 
+    # save yaml data
     with open(thresholds_path, "w") as f:
         yaml.dump(data, f, sort_keys=False)
 
@@ -746,7 +764,4 @@ def use_sdss_header(galname, bin_method, hduname, sdss_header, desc = None,
         else:
             header[hduname][key] = (value, comment)
 
-
-
-    
     return header

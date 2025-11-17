@@ -74,14 +74,16 @@ def cube_from_DAP(galname, bin_method, wave_slice = None, verbose = False):
     # copy the flux header and update the wavelength WCS values
     newheader = fluxheader.copy()
 
+    ref_pix = 8
     newheader['NAXIS3'] = (len(wave), 'Number of wavelength pixels')
-    newheader['CRVAL3'] = (wave[0], '[Angstrom] Coordinate value at reference point')
-    newheader['CRPIX3'] = (1, 'Pixel coordinate of reference point')
-    newheader['PC3_3'] = np.diff(wave)[0], 'Coordinate transformation matrix element'
+    newheader['CRVAL3'] = (wave[ref_pix], '[ang] Coordinate value at reference point')
+    newheader['CRPIX3'] = (int(ref_pix + 1), 'Pixel coordinate of reference point')
+    newheader['PC3_3'] = np.diff(wave)[ref_pix], 'Coordinate transformation matrix element'
     #newheader['CDELT3'] = (1.0, '[Angstrom] Coordinate increment at reference point')
-    newheader['CTYPE3'] = ('WAVE-LOG', 'Vacuum wavelength (logarithmic)')
-    newheader['CUNIT3'] = 'Angstrom'
-    newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[Angstrom] random error in coordinate')
+    #newheader['CTYPE3'] = ('WAVE-LOG', 'Vacuum wavelength (logarithmic)')
+    newheader['CTYPE3'] = ('wave', 'Vacuum wavelength')
+    newheader['CUNIT3'] = 'ang'
+    newheader['CRDER3'] = (fluxheader['CRDER3'] / 1e10, '[ang] random error in coordinate')
 
     # restructure header using WCS
     # wcs = WCS(header=newheader)

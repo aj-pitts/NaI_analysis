@@ -14,27 +14,22 @@ from modules import defaults, file_handler, util, plotter, inspect
 import mcmc_results
 
 
-def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True):
+def make_vmap(galname, bin_method, thresh=False, verbose=False, write_data=True):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
-    mcmc_table = mcmc_results.combine_mcmc_results(datapath_dict['MCMC'])
+    mcmc_table = mcmc_results.combine_mcmc_results(datapath_dict['MCMC'], verbose=verbose)
 
-    cube = fits.open(datapath_dict['LOGCUBE'])
-    maps = fits.open(datapath_dict['MAPS'])
-    local = fits.open(datapath_dict['LOCAL'])
-
-    if cube['primary'].header['dapqual'] == 30:
-        raise ValueError(f"LOGCUBE flagged as CRITICAL in Primary header.")
+    with fits.open(datapath_dict['LOGCUBE']) as cube:
+        binid = cube['BINID'].data[0]
+    with fits.open(datapath_dict['MAPS']) as maps:
+        stellarvel = maps['STELLAR_VEL'].data
+        stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
+    with fits.open(datapath_dict['LOCAL']) as local:
+        ewmap = local['ew_noem'].data
+        snrmap = local['nai_snr'].data
 
     lamrest = 5897.558
     c = 2.998e5
 
-    binid = cube['BINID'].data[0]
-
-    stellarvel = maps['STELLAR_VEL'].data
-    stellarvel_mask = maps['STELLAR_VEL_MASK'].data #DAPPIXMASK
-    
-    ewmap = local['ew_noem'].data
-    snrmap = local['nai_snr'].data
 
     vel_map = np.zeros(binid.shape) - 999.
 
@@ -92,7 +87,7 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
             velocity_err_lower = -999
 
         else:
-            frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity > 0 else np.sum(lambda_samples < lamrest)/lambda_samples.size
+            frac = np.sum(lambda_samples > lamrest)/lambda_samples.size if velocity > 0 else -np.sum(lambda_samples < lamrest)/lambda_samples.size
 
         frac_map[w] = frac
         vel_map[w] = velocity
@@ -102,7 +97,7 @@ def make_vmap(galname, bin_method, manual=False, verbose=False, write_data=True)
 
     vel_map_error = np.stack([vel_map_error_lower, vel_map_error_upper], axis=0)
 
-    threshold_mask = apply_velocity_mask(galname, bin_method, vel_map, vel_map_error, manual=manual, verbose=verbose)
+    threshold_mask = apply_velocity_mask(galname, bin_method, vel_map, vel_map_error, thresh=thresh, verbose=verbose)
     w = np.logical_and(threshold_mask.astype(bool), ~vmap_mask.astype(bool))
     vmap_mask[w] = 7
 
@@ -129,20 +124,19 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
 
     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
     local_file = datapath_dict['LOCAL']
-    hdul = fits.open(local_file)
 
-    spatial_bins = hdul['spatial_bins'].data.flatten()
-    unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
+    with fits.open(local_file) as hdul:
+        spatial_bins = hdul['spatial_bins'].data.flatten()
+        unique_bins, bin_inds = np.unique(spatial_bins, return_index=True)
+        snr = hdul['nai_snr'].data.flatten()[bin_inds]
+        ew = hdul['ew_noem'].data.flatten()[bin_inds]
+        ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
 
-    snr = hdul['nai_snr'].data.flatten()[bin_inds]
-    ew = hdul['ew_noem'].data.flatten()[bin_inds]
-    ew_mask = hdul['ew_noem_mask'].data.flatten().astype(bool)[bin_inds]
     velocity = vmap.flatten()[bin_inds]
     if vmap_error.ndim == 3:
         vmap_error = np.mean(abs(vmap_error), axis=0)
     velocity_error = vmap_error.flatten()[bin_inds]
     
-
     if vmap_mask is not None:
         velocity_mask = vmap_mask.flatten()[bin_inds]
         velocity_mask[velocity_mask==7] = 0
@@ -152,7 +146,7 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         datamask = ew_mask
 
     datamask = np.logical_or(datamask, velocity_error == 0)
-    threshold_dict = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+    threshold_dict = file_handler.threshold_parser(galname, bin_method)
 
     data = {}
     ew_lims = []
@@ -232,36 +226,37 @@ def compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask = Non
         data[key]['ew_lim'] = ew_lim
         ew_lims.append(ew_lim)
     
-    file_handler.write_thresholds(galname, ew_lims=ew_lims, overwrite=True)
+    file_handler.write_thresholds(galname, bin_method, ew_lims=ew_lims, overwrite=True)
     util.verbose_print(verbose, "Done.")
     #inspect.inspect_vstd_ew(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
     plotter.velocity_threshold_plots(galname, bin_method, data, vmap, vmap_error, ewnoem=True, scatter_lim=scatter_lim, verbose=verbose)
 
 
 
-def apply_velocity_mask(galname, bin_method, vmap, vmap_error, vmap_mask = None, manual = False, verbose = False):
+def apply_velocity_mask(galname, bin_method, vmap, vmap_error, vmap_mask = None, thresh = False, verbose = False):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
-    local = fits.open(datapath_dict['LOCAL'])
-
-    spatial_bins = local['spatial_bins'].data
-    ewmap = local['ew_noem'].data
-    snrmap = local['nai_snr'].data
+    
+    with fits.open(datapath_dict['LOCAL']) as local:
+        spatial_bins = local['spatial_bins'].data
+        ewmap = local['ew_noem'].data
+        snrmap = local['nai_snr'].data
     
     threshold_mask = np.zeros_like(spatial_bins)
 
-    if not manual:
+    if thresh:
         compute_ew_thresholds(galname, bin_method, vmap, vmap_error, vmap_mask, verbose=verbose)
     
     else: 
-        threshold_dict = file_handler.threshold_parser(galname, bin_method)
+        threshold_dict = file_handler.threshold_parser('default', bin_method)
+        util.sys_message(f"Using default thresholds", color='yellow', verbose=verbose)
         if threshold_dict['ew_lims'] is None:
-            print(f"Cannot apply velocity mask if using --manual and no thresholds written to thresholds.yaml")
-            print(f"Skipping Velocity Mask")
+            util.sys_warnings(f"Cannot apply velocity mask if using --thresh and no thresholds written to thresholds.yaml")
+            util.sys_warnings(f"Skipping Velocity Mask")
             inspect.inspect_vel_ew(galname, bin_method, contour=True, verbose=verbose)
             return
             
 
-    threshold_dict = file_handler.threshold_parser(galname, bin_method)
+    #threshold_dict = file_handler.threshold_parser(galname, bin_method)
     
     ## function to return the ew threshold given the snr
     def get_ew_cut(snr: float, thresholds: dict):
@@ -294,11 +289,12 @@ def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
 
     with fits.open(datapath_dict['LOGCUBE']) as cube:
         binid = cube['BINID'].data[0]
-        
+
     with fits.open(datapath_dict['LOCAL']) as local:
         vmap = local['v_nai'].data
         vmap_mask = local['v_nai_mask'].data
         vmap_error = local['v_nai_error'].data
+        vmap_frac = local['v_nai_frac'].data
 
         doppler_param = local['mcmc_results'].data[2]
         doppler_param_16 = local['mcmc_16th_perc'].data[2]
@@ -314,6 +310,10 @@ def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
         w = ID == binid
         Y, X = np.where(w)
         y, x = Y[0], X[0]
+
+        if vmap_frac[y, x] > - 0.95:
+            term_vmap_mask[w] = 20
+            continue
 
         bin_v_mask = vmap_mask[y, x]
         if bool(bin_v_mask):
@@ -356,7 +356,6 @@ def make_terminal_vmap(galname, bin_method, verbose = False, write_data = True):
         return term_vdict
         
 
-    
 def get_args():
     parser = argparse.ArgumentParser(description="A script to create an Na I velocity map from the MCMC results of a beta-corrected galaxy.")
 

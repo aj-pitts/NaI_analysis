@@ -74,7 +74,7 @@ def correct_dust(F_Ha, F_Hb, HaHb_ratio = 2.87, Rv = 3.1, k_Ha = 2.45, k_Hb = 3.
     return {'H_alpha':F_corr, 'E_BV':E_BV}
 
 
-def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mpc, c = 2.998e5 * u.km / u.s):
+def compute_SFR(flux_ha, bin_width, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mpc, c = 2.998e5 * u.km / u.s):
     """
     Computes the star formation rate (SFR) and the star formation rate surface density (SFRSD)
     given H-alpha flux, stellar velocity, and redshift, with optional uncertainty propagation.
@@ -133,7 +133,8 @@ def compute_SFR(flux_ha, stellar_velocity, redshift, H0 = 70 * u.km / u.s / u.Mp
 
     # compute the physical separation (length) of the spaxel
     D = c * z / H0 # physical distance
-    theta = Angle(0.2, unit='arcsec') # angular size of spaxel
+    theta = Angle(0.2, unit='arcsec') # angular size of 1 spaxel
+    theta *= bin_width # angular size of bin
     sep = (D * theta.radian).to(u.kpc).value # physical separation
     
     # compute the luminosity
@@ -267,7 +268,8 @@ def SFR_map(galname, bin_method, flux_key = "GFLUX", verbose = False, write_data
         ha_flux = ha_flux_corr[y[0], x[0]]
         sv = stellar_vel[y[0], x[0]]
 
-        sfrsd = compute_SFR(ha_flux, sv, redshift)
+        bin_w = np.sqrt(np.sum(w)) # bin_width for square bins
+        sfrsd = compute_SFR(ha_flux, bin_w, sv, redshift)
 
         if not np.isfinite(sfrsd):
             SFRSD_mask[w] = 5

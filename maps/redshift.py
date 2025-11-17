@@ -15,7 +15,7 @@ def redshift_map_dict(galname, bin_method, verbose = False, write_data = True):
 
     c = 2.998e5
 
-    items = np.unique(spatial_bins)[1:]
+    items = np.unique(spatial_bins)
     iterator = tqdm(items, desc="Constructing Redshift Field") if verbose else items
 
     zmap = np.zeros_like(spatial_bins) - 1.0
@@ -24,6 +24,9 @@ def redshift_map_dict(galname, bin_method, verbose = False, write_data = True):
 
     for ID in iterator:
         w = ID == spatial_bins
+        if ID == -1:
+            zmap_mask[w] = 1
+            continue
         ny, nx = np.where(w)
         y, x = ny[0], nx[0]
 

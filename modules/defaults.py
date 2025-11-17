@@ -167,7 +167,7 @@ def local_quality_flag():
 
 def analysis_plans():
     """
-    Returns a dictionary of the current default analysis plan methods.
+    Returns a str of the current default analysis plan methods.
 
     Returns
     -------

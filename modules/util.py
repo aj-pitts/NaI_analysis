@@ -13,6 +13,8 @@ from matplotlib import gridspec
 import pandas as pd
 import seaborn as sns
 
+from typing import Optional, Union
+
 def check_filepath(filepath, mkdir=True, verbose=True, error=True):
     """
     Checks whether or not a filepath exists using the `os` package. If the filepath does not exist,
@@ -53,7 +55,7 @@ def check_filepath(filepath, mkdir=True, verbose=True, error=True):
                     sys_warnings(f"'{path}' does not exist", verbose)
 
 
-def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 2):
+def check_bin_ID(spatial_ID, binid_map, DAPPIXMASK_list = None, stellar_velocity_map = None, s = 5):
     """
     Check whether a spatial bin should be included in analysis based on DAP bin maps, 
     masking criteria, and stellar velocity properties.
@@ -326,6 +328,20 @@ def sys_warnings(message, verbose = True):
         print(f"{yellow}WARNING{reset}: {message}", file=sys.stderr)
     return
 
+def sys_message(message, status = 'INFO', color = 'reset', verbose = True):
+    colors = {
+        'yellow':'\033[93m',
+        'green':'\033[32m',
+        'red':'\033[31m', 
+        'blue':'\033[34m',
+        'magenta':'\033[35m',
+        'cyan':'\033[36m',
+        'reset':'\033[0m'
+    }
+    if verbose:
+        print(f"{colors[color]}{status[:4]}{colors['reset']}: {message}", file=sys.stderr)
+    return
+
 
 def extract_unique_binned_values(measurement_map: np.ndarray | list | dict, bin_ID_map: np.ndarray, mask = None, return_bad = False, return_bins = False):
     if return_bad and not isinstance(measurement_map, np.ndarray):
@@ -393,3 +409,23 @@ def seaborn_histplot(xdata: dict, ydata: dict, ax, big_endian = True, pthresh = 
 
 def seaborn_palette(name, ncolors = 256, cmap = True):
     return sns.color_palette(name, n_colors=ncolors, as_cmap=cmap)
+
+def gs_group_label(gs: matplotlib.gridspec.GridSpec, fig: matplotlib.figure.Figure, 
+                   xlabel: Optional[str] = None, ylabel: Optional[str] = None, title: Optional[str] = None,
+                   xfontsize: Optional[Union[float, int, str]] = None,
+                   yfontsize: Optional[Union[float, int, str]] = None,
+                   titlesize: Optional[Union[float, int, str]] = None):
+
+    xfontsize = plt.rcParams['font.size'] if xfontsize is None else xfontsize
+    yfontsize = plt.rcParams['font.size'] if yfontsize is None else yfontsize
+
+    ax_group = fig.add_subplot(gs[:,:])
+    ax_group.set_xlabel(xlabel, fontsize = xfontsize)
+    ax_group.set_ylabel(ylabel, fontsize = yfontsize)
+    ax_group.set_title(title, fontsize=titlesize)
+    ax_group.tick_params(which = 'both', labelcolor='none', top=False, bottom=False, 
+                        left=False, right=False)
+    ax_group.spines['top'].set_visible(False)
+    ax_group.spines['right'].set_visible(False)
+    ax_group.spines['bottom'].set_visible(False)
+    ax_group.spines['left'].set_visible(False)

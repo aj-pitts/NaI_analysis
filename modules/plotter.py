@@ -3,12 +3,11 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 
-from scipy import stats
+from scipy.stats import pearsonr
 
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.gridspec as gridspec
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter
@@ -235,7 +234,7 @@ def local_MAP_grid(galname: str, bin_method: str, mask = True, show = False, sav
         'SNR':dict(image = snr, mask = snr_mask, cmap = cmr.sapphire, facecolor = 'k', vmin = 0, vmax = 100, v_str = r'$S/N_{\mathrm{Na\ D}}$'),
         'EW':dict(image = ew, mask = ew_mask, cmap = cmr.gem, facecolor = 'k', vmin=-0.5, vmax=2, v_str = r'$\mathrm{EW_{Na\ D}}\ \left( \mathrm{\AA} \right)$'),
 
-        'SFRSD':dict(image = sfrsd, mask = sfrsd_mask, cmap = util.seaborn_palette('rainbow'), facecolor = 'lightgray', vmin=-2.5, vmax=0, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ kpc^{-2}\ yr^{-1}} \right)$'),
+        'SFRSD':dict(image = sfrsd, mask = sfrsd_mask, cmap = util.seaborn_palette('rainbow'), facecolor = 'lightgray', vmin=-4.5, vmax=-1, v_str = r'$\mathrm{log\ \Sigma_{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$'),
 
         'V_BULK':dict(image = v_bulk, mask = v_mask, cmap = util.seaborn_palette('seismic'), facecolor = 'lightgray', vmin = -200, vmax = 200, v_str = r'$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$'),
     }
@@ -314,7 +313,7 @@ def local_MAP_grid(galname: str, bin_method: str, mask = True, show = False, sav
 
 
 def MAP_plotter(data: np.ndarray, cbar_label: str, directory: str, figname: str,
-                mask_data: Optional[np.ndarray] = None, verbose = False, **imshow_kwargs):
+                mask_data: Optional[np.ndarray] = None, show = False, save = True, verbose = False, **imshow_kwargs):
 
     plotmap = np.copy(data)
     if mask_data is not None:
@@ -333,22 +332,27 @@ def MAP_plotter(data: np.ndarray, cbar_label: str, directory: str, figname: str,
     cbar.set_label(f"{cbar_label}", labelpad=-55)
     cax.xaxis.set_ticks_position('top')
     
-    util.check_filepath(directory, verbose=verbose)
-    savepath = os.path.join(directory, figname)
-    plt.savefig(savepath, bbox_inches='tight')
-    plt.close()
-    util.verbose_print(verbose, f'MAP "{figname}" saved to "{savepath}"')
+    if save:
+        util.check_filepath(directory, verbose=verbose)
+        savepath = os.path.join(directory, figname)
+        plt.savefig(savepath, bbox_inches='tight')
+        util.verbose_print(verbose, f'MAP "{figname}" saved to "{savepath}"')
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
 
 def HIST_plotter(data: np.ndarray, spatial_bins: np.ndarray, x_label: str, directory: str, figname: str,
-                mask_data: Optional[np.ndarray] = None, show_masked = True, verbose = False, **hist_kwargs):
+                mask_data: Optional[np.ndarray] = None, show_masked = True, show = False, save = True, verbose = False, **hist_kwargs):
 
     ## separate good bins/data and bad bins/data using the mask
     if mask_data is not None:
         good_data, bad_data = util.extract_unique_binned_values(data, spatial_bins, mask_data, return_bad=True)
         bad_data = bad_data[bad_data!=-999] # get rid of default -999 values
-        histbins = np.linspace(min(bad_data.min(), good_data.min()), max(bad_data.max(), good_data.max()), 40)
+        bad_data = np.array([np.nan]) if len(bad_data) == 0 else bad_data
+        histbins = np.linspace(np.nanmin([bad_data.min(), good_data.min()]), np.nanmax([bad_data.max(), good_data.max()]), 40)
     else:
         good_data = util.extract_unique_binned_values(data, spatial_bins)
         histbins = np.linspace(good_data.min(),  good_data.max(), 40)
@@ -362,11 +366,16 @@ def HIST_plotter(data: np.ndarray, spatial_bins: np.ndarray, x_label: str, direc
     plt.xlabel(rf"{x_label}")
     plt.ylabel(r"$N_{\mathrm{bins}}$")
 
-    util.check_filepath(directory, verbose=verbose)
-    save_path = os.path.join(directory, figname)
-    plt.savefig(save_path, bbox_inches='tight')
-    plt.close()
-    util.verbose_print(verbose, f'HISTOGRAM "{figname}" saved to "{save_path}"')
+    if save:
+        util.check_filepath(directory, verbose=verbose)
+        save_path = os.path.join(directory, figname)
+        plt.savefig(save_path, bbox_inches='tight')
+        util.verbose_print(verbose, f'HISTOGRAM "{figname}" saved to "{save_path}"')
+        
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 
 
@@ -607,8 +616,19 @@ def enhanced_corner_plotter(galname, bin_method, bin_list, show=False, save=True
                         plt.show()
 
 
-def gas_properties_scatter(galname, bin_method, show = False, save = True, verbose = False):
+def gas_properties_scatter(galname, bin_method, pearson = False, show = False, save = True, verbose = False):
     datapath_dict = file_handler.init_datapaths(galname, bin_method)
+
+    def plot_pearson(ax, xdata, ydata, pearson = False):
+        if not pearson:
+            return
+        rank = pearsonr(xdata, ydata)
+
+        bbox_dict = dict(boxstyle='Round', edgecolor='k', facecolor='white', linewidth=1.5)
+        ax.text(0.05, .95, fr"$r={rank[0]:.2f}$", transform = ax.transAxes, ha='left', va='top', fontsize=14,
+                bbox=bbox_dict)
+        ax.text(0.95 , .95, fr"$p=\mathrm{{{rank[1]:.3G}}}$", transform = ax.transAxes, ha='right', va='top', fontsize=14,
+                bbox=bbox_dict)
 
     with fits.open(datapath_dict['LOCAL']) as local_hdu:
         spatial_bins = local_hdu['spatial_bins'].data
@@ -630,29 +650,24 @@ def gas_properties_scatter(galname, bin_method, show = False, save = True, verbo
         sfr_mask = local_hdu['sfrsd_mask'].data
         ebv = local_hdu['e(b-v)'].data
 
-    datamask = (vmap_mask + eqw_mask + sfr_mask).astype(bool)
+    frac_mask = (vfrac > -0.95) & (vfrac < 0.95)
     mcmc_mask = (logN == 0) | (bd == 0) | (Cf == 0)
-    outflow_mask = (vmap > 0) | (vfrac < .95)
-    inflow_mask = (vmap < 0) | (vfrac < .95)
-    mask_out = (datamask + mcmc_mask + outflow_mask).astype(bool)
-    mask_in = (datamask + mcmc_mask + inflow_mask).astype(bool)
+    datamask = (sfr_mask + frac_mask + vmap_mask + eqw_mask).astype(bool)
 
-    labels = [r'$\mathrm{EW_{Na\ D}\ \left( \AA \right)}$', r'$v_{\mathrm{cen}}\ \left( \mathrm{km\ s^{-1}} \right)$']
-    ylims = [(-.2,2.5), (-10,210)]
+    labels = [r'$\mathrm{EW_{Na\ D}\ \left( \AA \right)}$', r'$\left| v_{\mathrm{cen}} \right| \ \left( \mathrm{km\ s^{-1}} \right)$']
+    # ylims = [(-.2,2.5), (-10,210)]
+    ylims = [(-.2,3), (-10,250)]
 
 
     mapdict = {'EW':eqw, 'velocity':vmap}
-
+    mcmcdict = {'logn':logN, 'bd':bd, 'cf':Cf}
     secondary_mapdict = {'extinction':ebv, 'sfr':sfrmap}
 
-    outflow_dict = util.extract_unique_binned_values(mapdict, spatial_bins, mask=mask_out)
-    outflow_secondary = util.extract_unique_binned_values(secondary_mapdict, spatial_bins, mask=mask_out)
-    inflow_dict = util.extract_unique_binned_values(mapdict, spatial_bins, mask=mask_in)
-    inflow_secondary = util.extract_unique_binned_values(secondary_mapdict, spatial_bins, mask=mask_in)
+    map_select = util.extract_unique_binned_values(mapdict, spatial_bins, mask=datamask)
+    mcmc_select = util.extract_unique_binned_values(mcmcdict, spatial_bins, mask=datamask)
+    secondary_select = util.extract_unique_binned_values(secondary_mapdict, spatial_bins, mask=datamask)
 
-    outflow_dict['velocity'] = abs(outflow_dict['velocity'])
-
-
+    ### main plot
     base_w, base_h = plt.rcParams["figure.figsize"]
     nrow = 2
     ncol = 4
@@ -666,20 +681,12 @@ def gas_properties_scatter(galname, bin_method, show = False, save = True, verbo
     gs1 = main_gs[0,0].subgridspec(sub_nrow, sub_ncol, hspace = 0, wspace = 0.05)
     gs2 = main_gs[0,1].subgridspec(sub_nrow, sub_ncol, hspace = 0, wspace = 0.05)
 
-
     gs_list = [gs1, gs2]
 
     axes = {}
-    superlabels = [r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$", r"$E(B-V)$"]
+    superlabels = [r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$", r"$E(B-V)$"]
     for i, (gs, label) in enumerate(zip(gs_list, superlabels)):
-        ax_group = fig.add_subplot(gs[:,:])
-        ax_group.set_xlabel(f"{label}", fontsize=22)
-        ax_group.tick_params(which = 'both', labelcolor='none', top=False, bottom=False, 
-                            left=False, right=False)
-        ax_group.spines['top'].set_visible(False)
-        ax_group.spines['right'].set_visible(False)
-        ax_group.spines['bottom'].set_visible(False)
-        ax_group.spines['left'].set_visible(False)
+        util.gs_group_label(gs, fig, xlabel=label, xfontsize=22)
 
         for row in range(sub_nrow):
             for col in range(sub_ncol):
@@ -688,42 +695,55 @@ def gas_properties_scatter(galname, bin_method, show = False, save = True, verbo
                 key = f"{row}, {icol}"
                 axes[key] = ax
 
-    for irow, key in zip(range(nrow), outflow_dict.keys()):
+    outflows = map_select['velocity'] < 0
+    inflows = ~outflows
+
+    plotdict = {
+        'EW':map_select['EW'],
+        'velocity':abs(map_select['velocity'])
+    }
+
+    for irow, key in zip(range(nrow), list(map_select.keys())):
 
         label = labels[irow]
         ylim = ylims[irow]
 
         #kwargs = dict(s=15, marker='o', linewidths=0.75, alpha=1)
-
         ax1, ax2, ax3, ax4 = [axes[f"{irow}, {i}"] for i in range(ncol)]
 
-        #ax1.scatter(outflow_secondary['sfr'], outflow_dict[key], facecolors = facecolors_b, edgecolors = edgecolor_b, **kwargs)
-        ax1.scatter(outflow_secondary['sfr'], outflow_dict[key], c='dimgray', s=1, alpha=0.9)
-        util.seaborn_histplot({'sfr':outflow_secondary['sfr']}, {key:outflow_dict[key]}, ax1, cmap=cmr.arctic)
+        ax1.scatter(secondary_select['sfr'][outflows], plotdict[key][outflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'sfr':secondary_select['sfr'][outflows]}, {key:plotdict[key][outflows]}, ax1, cmap=cmr.arctic)
         ax1.set_ylabel(label, fontsize=22)
-        ax1.set_xlim(-2.6, 0)
+        ax1.set_xlim(secondary_select['sfr'][outflows].min(), secondary_select['sfr'][outflows].max())
         ax1.set_ylim(ylim)
-
-        ax2.scatter(inflow_secondary['sfr'], inflow_dict[key], c='dimgray', s=1, alpha=0.9)
-        util.seaborn_histplot({'sfr':inflow_secondary['sfr']}, {key:inflow_dict[key]}, ax2, cmap=cmr.sunburst)
+        plot_pearson(ax1, secondary_select['sfr'][outflows], plotdict[key][outflows], pearson=pearson)
+    
+        
+        ax2.scatter(secondary_select['sfr'][inflows], plotdict[key][inflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'sfr':secondary_select['sfr'][inflows]}, {key:plotdict[key][inflows]}, ax2, cmap=cmr.sunburst)
         ax2.set_ylabel('')
         ax2.set_yticklabels([])
-        ax2.set_xlim(-2.6, 0)
+        ax2.set_xlim(secondary_select['sfr'][inflows].min(), secondary_select['sfr'][inflows].max())
         ax2.set_ylim(ylim)
+        plot_pearson(ax2, secondary_select['sfr'][inflows], plotdict[key][inflows], pearson=pearson)
 
-        ax3.scatter(outflow_secondary['extinction'], outflow_dict[key], c='dimgray', s=1, alpha=0.9)
-        util.seaborn_histplot({'extinction':outflow_secondary['extinction']}, {key:outflow_dict[key]}, ax3, cmap=cmr.arctic)
+        
+        ax3.scatter(secondary_select['extinction'][outflows], plotdict[key][outflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'extinction':secondary_select['extinction'][outflows]}, {key:plotdict[key][outflows]}, ax3, cmap=cmr.arctic)
         ax3.set_ylabel('')
         ax3.set_yticklabels([])
-        ax3.set_xlim(0, 1)
+        ax3.set_xlim(secondary_select['extinction'][outflows].min(), secondary_select['extinction'][outflows].max())
         ax3.set_ylim(ylim)
+        plot_pearson(ax3, secondary_select['extinction'][outflows], plotdict[key][outflows], pearson=pearson)
 
-        ax4.scatter(inflow_secondary['extinction'], inflow_dict[key], c='dimgray', s=1, alpha=0.9)
-        util.seaborn_histplot({'extinction':inflow_secondary['extinction']}, {key:inflow_dict[key]}, ax4, cmap=cmr.sunburst)
+        
+        ax4.scatter(secondary_select['extinction'][inflows], plotdict[key][inflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'extinction':secondary_select['extinction'][inflows]}, {key:plotdict[key][inflows]}, ax4, cmap=cmr.sunburst)
         ax4.set_ylabel('')
         ax4.set_yticklabels([])
-        ax4.set_xlim(0, 1)
+        ax4.set_xlim(secondary_select['extinction'][inflows].min(), secondary_select['extinction'][inflows].max())
         ax4.set_ylim(ylim)
+        plot_pearson(ax4, secondary_select['extinction'][inflows], plotdict[key][inflows], pearson=pearson)
 
 
         if irow != nrow - 1:
@@ -757,96 +777,109 @@ def gas_properties_scatter(galname, bin_method, show = False, save = True, verbo
     else:
         plt.close()
 
-    return 
-    mcmc_labels = [r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$', r'$b_D\ \left( \mathrm{km\ s^{-1}} \right)$',r'$C_f$']
-    mcmc_ylims = (12.1, 16.4), (-5,110), (0,.95)
-    mcmcdict = {'logN':logN, 'bD':bd, 'Cf':Cf}
-    outflow_dict = util.extract_unique_binned_values(mcmcdict, spatial_bins, mask=mask_out)
-    inflow_dict = util.extract_unique_binned_values(mcmcdict, spatial_bins, mask=mask_in)
-
-    nrow = len(mcmc_labels)
+    ################
+    ### mcmc plot
+    nrow = 3
     ncol = 4
 
-    base_w, base_h = plt.rcParams["figure.figsize"]
-    fig = plt.figure(figsize=(ncol*base_w, nrow*base_h))
-    gs = GridSpec(nrow, ncol, figure=fig, hspace=0, wspace=0.3)
+    sub_nrow = 3
+    sub_ncol = 2
+    fig = plt.figure(figsize = (base_w * ncol, base_h * nrow))
 
-    # Create the nrow x ncol axes
-    axes = []
-    for i in range(nrow):
-        for j in range(ncol):
-            ax = fig.add_subplot(gs[i, j])
-            axes.append(ax)
+    main_gs = gridspec.GridSpec(1, 2, figure=fig, wspace=0.05)
 
-    for irow, key in zip(range(nrow), mcmcdict.keys()):
+    gs1 = main_gs[0,0].subgridspec(sub_nrow, sub_ncol, hspace = 0, wspace = 0.05)
+    gs2 = main_gs[0,1].subgridspec(sub_nrow, sub_ncol, hspace = 0, wspace = 0.05)
+
+    gs_list = [gs1, gs2]
+
+    axes = {}
+    superlabels = [r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1}} \right)$", r"$E(B-V)\ (\mathrm{mag})$"]
+    for i, (gs, label) in enumerate(zip(gs_list, superlabels)):
+        util.gs_group_label(gs, fig, xlabel=label, xfontsize=22)
+
+        for row in range(sub_nrow):
+            for col in range(sub_ncol):
+                ax = fig.add_subplot(gs[row, col])
+                icol = i*2+col
+                key = f"{row}, {icol}"
+                axes[key] = ax
+    
+    mcmc_labels = [r'$\mathrm{log}\ N\ \left( \mathrm{cm^{-2}} \right)$', r'$b_D\ \left( \mathrm{km\ s^{-1}} \right)$',r'$C_f$']
+    mcmc_ylims = (12.1, 16.4), (-5,110), (0,.95)
+
+    for irow, key in zip(range(nrow), mcmc_select.keys()):
+
         label = mcmc_labels[irow]
         ylim = mcmc_ylims[irow]
 
         #kwargs = dict(s=15, marker='o', linewidths=0.75, alpha=1)
 
-        col_inds = slice(irow * ncol , irow * ncol + ncol)
-        ax1, ax2, ax3, ax4 = axes[col_inds]
-
-        ax1.scatter(outflow_secondary['sfr'], outflow_dict[key], c='k', s=1, alpha=0.8)
-        ax1.set_ylabel(label)
-        ax1.set_xlim(-2.6, 0)
+        ax1, ax2, ax3, ax4 = [axes[f"{irow}, {i}"] for i in range(ncol)]
+        
+        ax1.scatter(secondary_select['sfr'][outflows], mcmc_select[key][outflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'sfr':secondary_select['sfr'][outflows]}, {key:mcmc_select[key][outflows]}, ax1, cmap=cmr.arctic)
+        ax1.set_ylabel(label, fontsize=22)
+        ax1.set_xlim(secondary_select['sfr'][outflows].min(), secondary_select['sfr'][outflows].max())
         ax1.set_ylim(ylim)
 
-        ax2.scatter(outflow_secondary['extinction'], outflow_dict[key], c='k', s=1, alpha=0.8)
+        ax2.scatter(secondary_select['sfr'][inflows], mcmc_select[key][inflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'sfr':secondary_select['sfr'][inflows]}, {key:mcmc_select[key][inflows]}, ax2, cmap=cmr.sunburst)
+        ax2.set_ylabel('')
         ax2.set_yticklabels([])
-        ax2.set_xlim(0, 1)
+        ax2.set_xlim(secondary_select['sfr'][inflows].min(), secondary_select['sfr'][inflows].max())
         ax2.set_ylim(ylim)
-
-
-        ax3.scatter(inflow_secondary['sfr'], inflow_dict[key], c='k', s=1, alpha=0.8)
-        #ax3.set_ylabel(label)
-        ax3.set_xlim(-2.6, 0)
+        
+        ax3.scatter(secondary_select['extinction'][outflows], mcmc_select[key][outflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'extinction':secondary_select['extinction'][outflows]}, {key:mcmc_select[key][outflows]}, ax3, cmap=cmr.arctic)
+        ax3.set_ylabel('')
+        ax3.set_yticklabels([])
+        ax3.set_xlim(secondary_select['extinction'][outflows].min(), secondary_select['extinction'][outflows].max())
         ax3.set_ylim(ylim)
 
-        ax4.scatter(inflow_secondary['extinction'], inflow_dict[key], c='k', s=1, alpha=0.8)
+        ax4.scatter(secondary_select['extinction'][inflows], mcmc_select[key][inflows], c='dimgray', s=1, alpha=0.9)
+        util.seaborn_histplot({'extinction':secondary_select['extinction'][inflows]}, {key:mcmc_select[key][inflows]}, ax4, cmap=cmr.sunburst)
+        ax4.set_ylabel('')
         ax4.set_yticklabels([])
-        ax4.set_xlim(0, 1)
+        ax4.set_xlim(secondary_select['extinction'][inflows].min(), secondary_select['extinction'][inflows].max())
         ax4.set_ylim(ylim)
 
 
-        if irow == nrow - 1:
-            #ax1.set_xlabel(r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$")
-            ax1.set_xlabel(r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$")
-            ax2.set_xlabel(r"$E(B-V)$")
-            #ax3.set_xlabel(r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}\ spaxel^{-1}} \right)$")
-            ax3.set_xlabel(r"$\mathrm{log}\ \Sigma_{\mathrm{SFR}}\ \left( \mathrm{M_{\odot}\ yr^{-1}\ kpc^{-2}} \right)$")
-            ax4.set_xlabel(r"$E(B-V)$")
-        else:
+        if irow != nrow - 1:
             ax1.set_xticklabels([])
             ax2.set_xticklabels([])
             ax3.set_xticklabels([])
             ax4.set_xticklabels([])
+        else:
 
-            ax1.set_xlabel('')
-            ax2.set_xlabel('')
-            ax3.set_xlabel('')
-            ax4.set_xlabel('')
+            ax3.set_xticklabels([0, None, 0.5, None, 1])
+            ax4.set_xticklabels([0, None, 0.5, None, 1])
 
-    # for ax in axes:
-    #     ax.set_box_aspect(1)
+        ax1.set_xlabel('')
+        ax2.set_xlabel('')
+        ax3.set_xlabel('')
+        ax4.set_xlabel('')
+
+    for ax in list(axes.values()):
+        ax.set_box_aspect(1)
+        ax.grid(visible=True, linestyle = 'dotted', alpha=0.5)
 
     if save:
         results_dir = defaults.get_fig_paths(galname, bin_method, subdir='results')
         scatter_dir = os.path.join(results_dir, 'scatter')
         util.check_filepath(scatter_dir, mkdir=True, verbose=verbose)
 
-        plt.savefig(os.path.join(scatter_dir, 'MCMC_vs_SFR_DUST.pdf'), bbox_inches='tight')
-        plt.close()
+        plt.savefig(os.path.join(scatter_dir, f'{galname}-{bin_method}_MCMC_vs_SFR_DUST.pdf'), bbox_inches='tight')
+
     if show:
         plt.show()
-
-
-def incidence():
+    else:
+        plt.close()
     return
 
 
-def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = False, show_binID = False, show_emline_masking = True, 
-                 show = False, save = True, overwrite = True, verbose = False):
+def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = False, show_binID = False, show_emline_masking = True, show_vmax_out = True, 
+                 individual = False, show = False, save = True, overwrite = True, verbose = False):
     plt.style.use(os.path.join(defaults.get_default_path('config'), 'figures.mplstyle'))
 
     datapath_dict = file_handler.init_datapaths(galname, bin_method, verbose = False)
@@ -887,14 +920,15 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
 
     snr_llim = 45
 
-    low_snr_llim = 20
-    low_snr_ulim = 40
+    low_snr_llim = 30
+    low_snr_ulim = 35
 
     delta_ew_llim = 0.1
 
     mask_arrays = {
-        'outflow':(vmax > vmaxlim) & (snrs > snr_llim) & (~datamask),
-        'inflow':(vcen > vcenlim) & (vfrac > 0.95) & (snrs > snr_llim) & (~datamask),
+        'outflow':(vcen < -2 * vcenlim) & (vfrac < -0.95) & (snrs > snr_llim) & (~vcen_mask.astype(bool)),
+        'maxout':(vmax > vmaxlim) & (snrs > snr_llim) & (~vmax_mask.astype(bool)),
+        'inflow':(vcen > vcenlim) & (vfrac > 0.95) & (snrs > snr_llim) & (~vcen_mask.astype(bool)),
         'pcygni':(snrs >= 90) & (delta_ew > delta_ew_llim) & (delta_ew < 0.5) & (~datamask),
         'low_snrs':(snrs > low_snr_llim) & (snrs < low_snr_ulim) & (~datamask)
     }
@@ -902,14 +936,17 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
     ## arrays to use for sorting if not using random select
     if not random_draw:
         sort_dict = {
+            'outflow':ew.flatten(),
             'inflow':ew.flatten(),
-            'outflow':vmax.flatten(),
-            'pcygni':snrs.flatten(),
+            'maxout':ew.flatten(),
+            #'pcygni':snrs.flatten(),
+            'pcygni':delta_ew.flatten(),
             'low_snrs':None
         }
 
     title_dict = {
-        'outflow':fr'$v_{{\mathrm{{max,\ out}}}} < -{vmaxlim}\ \mathrm{{km\ s^{{-1}}}}$',
+        'outflow':fr'$v_{{\mathrm{{cen}}}} < {-2 * vcenlim}\ \mathrm{{km\ s^{{-1}}}}$',
+        'maxout':fr'$v_{{\mathrm{{max,\ out}}}} < -{vmaxlim}\ \mathrm{{km\ s^{{-1}}}}$',
         'inflow':fr'$v_{{\mathrm{{cen}}}} > {vcenlim}\ \mathrm{{km\ s^{{-1}}}}$',
         'pcygni':fr'$\mathrm{{PCygni}}\ \left( \mathrm{{\Delta EW > {delta_ew_llim}\ \AA}} \right)$',
         'low_snrs':fr'${low_snr_llim} < S/N_{{\mathrm{{Na\ D}}}} < {low_snr_ulim}$'
@@ -928,11 +965,15 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
         else:
             sort_array = sort_dict[key]
             if sort_array is not None:
-                sort_inds = np.argsort(sort_array[unique_inds])
+                mask = mask_arrays[key]
+                sort_array = sort_array[mask.flatten()][unique_inds]
+                sort_inds = list(reversed(np.argsort(sort_array)))
                 sorted_bins = unique_bins[sort_inds]
             else:
                 sorted_bins = unique_bins
-            sorted_bins_select = np.setdiff1d(sorted_bins, bin_array)
+            #sorted_bins_select = np.setdiff1d(sorted_bins, bin_array)
+            bins_select = ~np.isin(sorted_bins, bin_array)
+            sorted_bins_select = sorted_bins[bins_select]
             select = sorted_bins_select[:choice_size]
         groupings[key] = select
 
@@ -954,6 +995,202 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
 
     n_plots = 4
     nrow, ncol = grouping_dims
+        # Helper function to create and populate a single gridspec
+    def create_grid_plot(gs, bin_arr, key, fig):
+        """Create a grid of plots for a single category"""
+        axes_dict = {}
+        top_ymax = 1.1 
+        top_ymin = .9
+        bottom_ymax = 1
+        bottom_ymin = 0.9
+
+        util.gs_group_label(gs, fig, xlabel=r'Rest Velocity $\mathrm{\left( km\ s^{-1} \right)}$', 
+                          ylabel='Normalized Flux', title=fr"{title_dict[key]}", 
+                          xfontsize=24, yfontsize=24, titlesize=18)
+
+        for row in range(nrow):
+            axes_dict[row] = {}
+            for col in range(ncol):
+                inner = gridspec.GridSpecFromSubplotSpec(
+                    2, 1, subplot_spec=gs[row, col], hspace=0, height_ratios=[3.5,1]
+                )
+                ax_top = fig.add_subplot(inner[0])
+                ax_bottom = fig.add_subplot(inner[1])
+                axes_dict[row][col] = {'top':ax_top, 'bottom':ax_bottom}
+
+                binID = bin_arr[row * ncol + col]
+                w = binID == spatial_bins
+                ny, nx = np.where(w)
+                y, x = ny[0], nx[0]
+
+                ew_val = ewnoem[y,x]
+                snr = snrs[y,x]
+                vmaxout = vmax[y,x]
+                lambda_0 = mcmc_cube[0, y, x]
+                lambda_16 = mcmc_16[0, y, x]
+                lambda_84 = mcmc_84[0, y, x]
+                z = redshift[y, x]
+                
+                restwave = wave / (1 + z)
+                flux_1D = flux[:, y, x]
+                model_1D = stellar_cont[:, y, x]
+                nflux = flux_1D / model_1D
+                wave_window = (restwave >= NaD_window[0]) & (restwave <= NaD_window[1])
+                inds = np.where(wave_window)
+
+                lamblu0 = 5891.5833
+                lamred0 = 5897.5581
+                c = 2.998e5
+                rest_velocity = ((restwave[inds] / lamred0) - 1) * c
+                normflux = nflux[inds]
+                v0 = ((lambda_0 / lamred0) - 1) * c
+                v16 = ((lambda_16 / lamred0)) * c
+                v84 = ((lambda_84 / lamred0)) * c
+                vred0 = 0
+                vblu0 = ((lamblu0 / lamred0) - 1) * c
+
+                ax_top.plot(rest_velocity, normflux, color=COLORS['data'], 
+                          drawstyle='steps-mid', linewidth=1.3)
+
+                textbox_kwargs = dict(va='top', color='#000000', fontsize=10, bbox=None)
+                if show_binID:
+                    ax_top.text(.95,.975, f"{int(binID)}", transform=ax_top.transAxes, 
+                              ha='right', va='top', fontsize=7)
+                    ax_top.text(0.05, 0.95, rf"$\mathrm{{EW}} = {ew_val:.2f}\ \mathrm{{\AA}}$"
+                              "\n" rf"$S/N = {snr:.0f}$", transform=ax_top.transAxes, 
+                              ha='left', **textbox_kwargs)
+                else:
+                    ax_top.text(.05,.95, rf"$\mathrm{{EW}} = {ew_val:.2f}\ \mathrm{{\AA}}$", 
+                              transform=ax_top.transAxes, ha='left', **textbox_kwargs)
+                    ax_top.text(.95,.95, rf"$S/N = {snr:.0f}$", transform=ax_top.transAxes, 
+                              ha='right', **textbox_kwargs)
+
+                ax_top.fill_between([v0-v16, v0+v84], [-20, -20], [20, 20], 
+                                   color=COLORS['uncertainty'], alpha=0.2)
+                ax_top.vlines([v0], -20, 20, colors='#000000', linestyles='dashed', linewidths=1.)
+
+                if show_vmax_out:
+                    if vmaxout > 0 and v0 < 0:
+                        ax_top.vlines([-vmaxout], -20, 20, colors=COLORS['model'], 
+                                    linestyles='dashed', linewidths=1.0)
+
+                ax_top.vlines([vblu0, vred0], -20, 20, colors=COLORS['vline'], 
+                            linestyles='dotted', linewidths=0.9)
+                ax_bottom.vlines([vblu0, vred0], -20, 20, colors=COLORS['vline'], 
+                                linestyles='dotted', linewidths=0.9)
+                ax_top.hlines([1.0], -2000, 2000, colors=COLORS['hline'], 
+                            linestyles='dotted', linewidths=0.9)
+
+                top_ymin = min(np.min(normflux) - .025, top_ymin)
+                top_ymax = max(np.max(normflux) + .025, top_ymax)
+                ax_top.set_xticklabels([])
+
+                if show_emline_masking:
+                    s=1
+                    blim = [5850.0, 5870.0]
+                    rlim = [5910.0, 5930.0]
+                    bind = np.where((restwave > blim[0]) & (restwave < blim[1]))
+                    rind = np.where((restwave > rlim[0]) & (restwave < rlim[1]))
+                    continuum = np.concatenate((nflux[bind], nflux[rind]))
+                    median = np.median(continuum)
+                    standard_dev = np.std(continuum)
+                    wave_window = (restwave >= NaD_fit_window[0]) & (restwave <= NaD_fit_window[1])
+                    wave_in_window = restwave[wave_window]
+                    vel_in_window = ((wave_in_window / lamred0) - 1) * c
+                    flux_in_window = nflux[wave_window]
+                    flux_masked = flux_in_window.copy()
+                    mask = flux_in_window <= median + s * standard_dev
+                    flux_masked[mask] = np.nan
+                    ax_top.plot(vel_in_window, flux_masked, color=COLORS['masked'], 
+                              drawstyle='steps-mid', lw=1.3)
+                
+                max_flux = max(flux_1D[inds].max(), model_1D[inds].max())
+                min_flux = min(flux_1D[inds].min(), model_1D[inds].min())
+                bottom_ymax = max(bottom_ymax, max_flux)
+                obsflux_norm = flux_1D[inds] / max_flux
+                stellarmodel_norm = model_1D[inds] / max_flux
+                bottom_ymin = min(bottom_ymin, min(obsflux_norm.min(), stellarmodel_norm.min()))
+
+                ax_bottom.plot(rest_velocity, obsflux_norm, color=COLORS['data'], 
+                             drawstyle='steps-mid', lw=1.3)
+                ax_bottom.plot(rest_velocity, stellarmodel_norm, color=COLORS['model'], 
+                             drawstyle='steps-mid', lw=1.3)
+
+                NaD_velocity_window = (((NaD_window[0] / lamred0) - 1) * c, 
+                                      ((NaD_window[1] / lamred0) - 1) * c)
+                ax_top.set_xlim(NaD_velocity_window)
+                ax_bottom.set_xlim(NaD_velocity_window)
+                ax_bottom.set_yticklabels([])
+
+                if row < nrow - 1:
+                    ax_bottom.set_xticklabels([])
+                if col > 0:
+                    ax_top.set_yticklabels([])
+
+        # Apply y-limits after all plots are created
+        for row in range(nrow):
+            for col in range(ncol):
+                ax_top = axes_dict[row][col]['top']
+                ax_bottom = axes_dict[row][col]['bottom']
+                ax_top.set_ylim(np.floor(top_ymin * 40) / 40, np.ceil(top_ymax * 40) / 40)
+                ax_bottom.set_ylim(bottom_ymin, 1.0)
+
+    # Main plotting logic - either combined or individual
+    if individual:
+        # Create separate figure for each category
+        for gs_idx, (key, bin_arr) in enumerate(groupings.items()):
+            fig = plt.figure(figsize=(base_w * ncol, base_h * nrow))
+            gs = gridspec.GridSpec(nrow, ncol, figure=fig, hspace=0, wspace=0)
+            create_grid_plot(gs, bin_arr, key, fig)
+            
+            if save:
+                output_dir = defaults.get_fig_paths(galname, bin_method, subdir='inspection')
+                if overwrite:
+                    fname = f'{galname}-{bin_method}_bin_profiles_{key}.pdf'
+                else:
+                    files = [f for f in os.listdir(output_dir) if f'bin_profiles_{key}' in f]
+                    fname = f'{galname}-{bin_method}_bin_profiles_{key}_{len(files)}.pdf'
+                figpath = os.path.join(output_dir, fname)
+                plt.savefig(figpath, bbox_inches='tight')
+                util.verbose_print(verbose, f'Bin profiles figure saved to {figpath}')
+            
+            if show:
+                plt.show()
+            else:
+                plt.close()
+        print('Done')
+    else:
+        groupings.pop('outflow')
+        # Create combined figure with all categories
+        fig = plt.figure(figsize=(base_w * ncol * 1.5, base_h * nrow * 1.5))
+        main_gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.2, hspace=0.1)
+        gs_plots = [
+            main_gs[0,0].subgridspec(nrow, ncol, hspace=0, wspace=0),
+            main_gs[0,1].subgridspec(nrow, ncol, hspace=0, wspace=0),
+            main_gs[1,0].subgridspec(nrow, ncol, hspace=0, wspace=0),
+            main_gs[1,1].subgridspec(nrow, ncol, hspace=0, wspace=0)
+        ]
+        
+        for gs_idx, (gs, (key, bin_arr)) in enumerate(zip(gs_plots, groupings.items())):
+            create_grid_plot(gs, bin_arr, key, fig)
+        
+        if save:
+            output_dir = defaults.get_fig_paths(galname, bin_method, subdir='inspection')
+            if overwrite:
+                fname = f'{galname}-{bin_method}_bin_profiles.pdf'
+            else:
+                files = [f for f in os.listdir(output_dir) if 'bin_profiles' in f]
+                fname = f'{galname}-{bin_method}_bin_profiles_{len(files)}.pdf'
+            figpath = os.path.join(output_dir, fname)
+            plt.savefig(figpath, bbox_inches='tight')
+            util.verbose_print(verbose, f'Bin profiles figure saved to {figpath}')
+        
+        if show:
+            plt.show()
+        else:
+            plt.close()
+    return
+
     fig = plt.figure(figsize = (base_w * ncol * 1.5, base_h * nrow * 1.5))
 
     main_gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.2, hspace=0.1)
@@ -977,16 +1214,8 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
         bottom_ymax = 1
         bottom_ymin = 0.9
 
-        ax_group = fig.add_subplot(gs[:,:])
-        ax_group.set_ylabel('Normalized Flux', fontsize=24)
-        ax_group.set_xlabel(r'Rest Velocity $\mathrm{\left( km\ s^{-1} \right)}$', fontsize=24)
-        ax_group.set_title(fr"{title_dict[key]}", fontsize=18)
-        ax_group.tick_params(which = 'both', labelcolor='none', top=False, bottom=False, 
-                            left=False, right=False)
-        ax_group.spines['top'].set_visible(False)
-        ax_group.spines['right'].set_visible(False)
-        ax_group.spines['bottom'].set_visible(False)
-        ax_group.spines['left'].set_visible(False)
+        util.gs_group_label(gs, fig, xlabel=r'Rest Velocity $\mathrm{\left( km\ s^{-1} \right)}$', ylabel='Normalized Flux', 
+                            title = fr"{title_dict[key]}", xfontsize=24, yfontsize=24, titlesize=18)
 
         for row in range(nrow):
             axes_dict[gs_idx][row] = {}
@@ -1059,8 +1288,10 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
                 ax_top.fill_between([v0-v16, v0+v84], [-20, -20], [20, 20], color=COLORS['uncertainty'],
                             alpha=0.2)
                 ax_top.vlines([v0], -20, 20, colors = '#000000', linestyles = 'dashed', linewidths = 1.)
-                if vmaxout > 0 and v0 < 0:
-                    ax_top.vlines([-vmaxout], -20, 20, colors=COLORS['model'], linestyles='dashed', linewidths = 1.0)
+
+                if show_vmax_out:
+                    if vmaxout > 0 and v0 < 0:
+                        ax_top.vlines([-vmaxout], -20, 20, colors=COLORS['model'], linestyles='dashed', linewidths = 1.0)
 
                 ax_top.vlines([vblu0, vred0], -20, 20, colors = COLORS['vline'], linestyles = 'dotted', linewidths = 0.9)
                 ax_bottom.vlines([vblu0, vred0], -20, 20, colors=COLORS['vline'], linestyles = 'dotted', linewidths = 0.9)
@@ -1152,9 +1383,6 @@ def bin_profiles(galname, bin_method, grouping_dims = (6, 4), random_draw = Fals
         plt.show()
     else:
         plt.close()
-        
-
-
 
 def plot_bin_profiles(galname, bin_method, bin_array = None, grouping = 'all', show = False, save = True, overwrite = True, show_emline_masking = True, verbose = False):
     if bin_array is not None: 
@@ -1200,7 +1428,7 @@ def plot_bin_profiles(galname, bin_method, bin_array = None, grouping = 'all', s
     groupings = {}
     kwargs_dict = {
         'inflow':dict(ylim=None),
-        'outflow':dict(ylim=None),
+        'maxout':dict(ylim=None),
         'pcygni':dict(ylim=(0.85,1.1)),
         'low_snrs':dict(ylim=None)
         }
@@ -1208,7 +1436,7 @@ def plot_bin_profiles(galname, bin_method, bin_array = None, grouping = 'all', s
         bin_array = []
         mask_arrays = {
             'inflow':(vmax > 0) & (snrs > 45) & (~datamask),
-            'outflow':(vcen > 0) & (vfrac > 0.95) & (snrs > 45) & (~datamask),
+            'maxout':(vcen > 0) & (vfrac > 0.95) & (snrs > 45) & (~datamask),
             'pcygni':(snrs >= 90) & (delta_ew > 0.1) & (delta_ew < 0.5) & (~datamask),
             'low_snrs':(snrs > 20) & (snrs < 40) & (~datamask)
         }
@@ -1465,7 +1693,7 @@ def velocity_threshold_plots(galname, bin_method, threshold_data, vmap, vmap_err
     file_end = '_maskedem' if ewnoem else ''
     out_file = os.path.join(outpath, f'{galname}-{bin_method}_v_thresholds{file_end}.pdf')
 
-    thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=False)
+    thresholds = file_handler.threshold_parser(galname, bin_method, require_ew=True)
     snranges = thresholds['sn_lims']
     ewlims = thresholds['ew_lims']
 
@@ -1635,232 +1863,73 @@ def plot_BPT_MAP(galname, bin_method, show = False, save = True, verbose=False):
     #     percentage = (count / bpt_map.size) * 100
     #     print(f"{name:15s}: {count:5d} pixels ({percentage:5.2f}%)")
 
+def incidence(galname, bin_method, sfr_dex = 0.4, test = False, show = False, save = True, figname = None, verbose = False):
+    datapaths = file_handler.init_datapaths(galname, bin_method)
+    localfile = datapaths['LOCAL']
 
-def incidence():
-    return 
+    with fits.open(localfile) as hdul:
+        vfrac = hdul['v_nai_frac'].data.copy()
 
-# def corner_plotter(galname, bin_method, bin_list, show = False, save = True, verbose = False):
-#     datapath_dict = file_handler.init_datapaths(galname, bin_method)
-#     mcmc_files = datapath_dict['MCMC']
+        sfr = hdul['sfrsd'].data.copy()
+        sfr_mask = hdul['sfrsd_mask'].data.copy()
 
-#     with fits.open(datapath_dict['LOGCUBE']) as logcube:
-#         flux_cube = logcube['FLUX'].data
-#         model_cube = logcube['MODEL'].data
-#         wavelength = logcube['WAVE'].data
-    
-#     with fits.open(datapath_dict['LOCAL']) as local:
-#         redshift = local['REDSHIFT'].data
-#         binmap = local['SPATIAL_BINS'].data
+        spatial_bins = hdul['spatial_bins'].data.copy()
 
-#     sorted_paths = sort_paths(mcmc_files)
+        sfrmask = (sfr == -999) | (sfr_mask.astype(bool))
 
-#     NaD_window = (5875, 5915)
+        if test:
+            vmap = hdul['v_nai'].data.copy()
+            datamask = (sfrmask + ((vmap < 40) & (vmap > -40))).astype(bool)
+        
+        else:
+            datamask = sfrmask
+        
+        
 
-#     for binID in bin_list:
-#         util.verbose_print(verbose, f"Obtaining samples for bin {binID}")
-#         w = binID == binmap
-#         ny,nx = np.where(w)
-#         y,x = ny[0], nx[0]
+    sample_dict = util.extract_unique_binned_values({'sfr':sfr, 'vfrac':vfrac}, spatial_bins, mask = datamask)
+    sf = sample_dict['sfr']
+    vfrac = sample_dict['vfrac']
 
-#         z = redshift[y,x]
-#         flux_bin = flux_cube[:,y,x]
-#         stellar_flux_bin = model_cube[:,y,x]
-#         restwave_bin = wavelength/(1+z)
+    sfmin, sfmax = sf.min(), sf.max()
+    sfrbins = np.arange(sfmin, sfmax + sfr_dex, sfr_dex)
+    binned_centers = 0.5 * (sfrbins[-1:] + sfrbins[1:])
+    widths = np.diff(sfrbins)
+    inds = np.digitize(sf, sfrbins)
 
-#         NaD_lims = (restwave_bin>=NaD_window[0]) & (restwave_bin<=NaD_window[1])
+    frac_in = [np.sum(vfrac[i == inds] >= .95) / np.sum(i == inds) for i in range(1, len(sfrbins))]
+    frac_out = [np.sum(vfrac[i == inds] <= -.95) / np.sum(i == inds) for i in range(1, len(sfrbins))]
+  
+    base_w, base_h = plt.rcParams['figure.figsize']
+    nrow = 1; ncol = 2
+    fig = plt.figure(figsize=(base_w * ncol, base_h * nrow))
+    gs = gridspec.GridSpec(nrow, ncol, figure=fig, wspace=0.1)
 
-#         flux = flux_bin[NaD_lims]
-#         stellar_flux = stellar_flux_bin[NaD_lims]
-#         restwave = restwave_bin[NaD_lims]
+    util.gs_group_label(gs=gs, fig=fig, xlabel = r'$\mathrm{log\ \Sigma_{SFR}\ \left( M_{\odot}\ yr^{-1}\ kpc^{-2}\ spx^{-1} \right)}$')
 
-#         normflux = flux/stellar_flux
-#         for mcmc_fil in sorted_paths:
-#             path, file = os.path.split(mcmc_fil)
-#             match = re.search(r'binid-(\d+)-(\d+)-samples', file)
+    ax_out = fig.add_subplot(gs[0,0])
+    ax_out.bar(binned_centers, frac_out, width=widths/2, align='center', edgecolor='k', color = '#0063ff',
+            linewidth = 0.9)
+    #ax_out.set_ylabel(r'$f_{v_{\mathrm{cen}} \in \left\{ P(\Delta v) \geq 0.95 \right\} }$')
+    ax_out.set_ylabel(r'Incidence')
+    ax_out.set_ylim(0, 1)
+    ax_out.set_xlim(None, sfmax)
 
-#             if match:
-#                 start_ID = int(match.group(1))
-#                 end_ID = int(match.group(2))
+    ax_in = fig.add_subplot(gs[0,1])
+    ax_in.bar(binned_centers, frac_in, width=widths/2, align='center', edgecolor='k', color = '#ce0014',
+            linewidth = 0.9)
+    ax_in.set_ylim(0, 1)
+    ax_in.set_yticklabels([])
+    ax_in.set_xlim(None, sfmax)
 
-#                 if start_ID <= binID <= end_ID:
-#                     util.verbose_print(verbose, f"    File found {file}")
-#                     data = fits.open(mcmc_fil)
-#                     data_table = Table(data[1].data)
+    if save:
+        resultsdir = defaults.get_fig_paths(galname, bin_method, subdir = 'results')
+        output_dir = os.path.join(resultsdir, 'hists')
+        fname = f'{galname}-{bin_method}_incidence.pdf' if figname is None else figname
 
-#                     all_bins = data_table['bin'].data
-
-#                     i = np.where(binID == all_bins)[0][0]
-#                     samples = data_table[i]['samples']
-#                     percentiles = data_table[i]['percentiles']
-#                     theta = percentiles[:,0]
-#                     model_dict = model_nai.model_NaI(theta, z, restwave)
-
-#                     flat_samples = samples[:,1000:,:].reshape(-1, 4)
-#                     labels = [r'$\lambda$', r'$\mathrm{log}N$', r'$b_D$', r'$C_f$']
-
-#                     corner_fig = corner.corner(
-#                             flat_samples,
-#                             labels=labels,
-#                             show_titles=True,
-#                             title_fmt=".2f",
-#                             quantiles=[0.16, 0.5, 0.84]
-#                             #title_kwargs={"fontsize": 12}
-#                     )
-
-#                     # Single flux + model plot on the right  
-#                     ax_spec = corner_fig.add_axes([0.7, 0.7, 0.25, 0.25]) # [left, bottom, width, height] in figure coords
-
-#                     # Plot observed flux and best-fit model on same axes
-#                     ax_spec.plot(restwave, normflux, 'k', linewidth=1, drawstyle='steps-mid')
-#                     ax_spec.plot(model_dict['modwv'], model_dict['modflx'], 'b', 
-#                                 linewidth=1.5, label='Best Fit Model')
-
-#                     ax_spec.set_xlabel(r'Wavelength $\left( \mathrm{\AA} \right)$')
-#                     ax_spec.set_ylabel('Normalized Flux')
-#                     #ax_spec.legend()
-#                     ax_spec.grid(True, alpha=0.3)
-#                     ax_spec.set_xlim(NaD_window)
-
-#                     # Optional: add residuals as small subplot below
-#                     # ax_resid = fig.add_subplot(gs[1], ...)
-#                     # ax_resid.plot(wavelength, observed_flux - model_flux, 'gray')
-
-#                     corner_fig.suptitle(f"Bin {binID}")
-#                     plt.show()
-
-#                     if save:
-#                         output_dir = defaults.get_fig_paths(galname, bin_method, subdir = 'inspection')
-#                         fname = f"Samples_corner_bin_{binID}.pdf"
-#                         figpath = os.path.join(output_dir, fname)
-#                         plt.savefig(figpath, bbox_inches='tight')
-#                         util.verbose_print(verbose, f"   Figure saved to {figpath}\n")
-#                         plt.close()
-#                     break
-#         else:
-#             print(f'No file found for bin {binID}\n')
-
-# def chain_plotter(galname, bin_method, bin_list, show = False, save = True, verbose = False):
-#     from chainconsumer import ChainConsumer, Chain, PlotConfig, Truth
-#     import pandas as pd
-
-#     datapath_dict = file_handler.init_datapaths(galname, bin_method)
-#     mcmc_files = datapath_dict['MCMC']
-
-#     with fits.open(datapath_dict['LOGCUBE']) as logcube:
-#         flux_cube = logcube['FLUX'].data
-#         model_cube = logcube['MODEL'].data
-#         wavelength = logcube['WAVE'].data
-    
-#     with fits.open(datapath_dict['LOCAL']) as local:
-#         redshift = local['REDSHIFT'].data
-#         binmap = local['SPATIAL_BINS'].data
-
-#     sorted_paths = sort_paths(mcmc_files)
-
-#     NaD_window = (5875, 5915)
-
-#     for binID in bin_list:
-#         util.verbose_print(verbose, f"Obtaining samples for bin {binID}")
-#         w = binID == binmap
-#         ny,nx = np.where(w)
-#         y,x = ny[0], nx[0]
-
-#         z = redshift[y,x]
-#         flux_bin = flux_cube[:,y,x]
-#         stellar_flux_bin = model_cube[:,y,x]
-#         restwave_bin = wavelength/(1+z)
-
-#         NaD_lims = (restwave_bin>=NaD_window[0]) & (restwave_bin<=NaD_window[1])
-
-#         flux = flux_bin[NaD_lims]
-#         stellar_flux = stellar_flux_bin[NaD_lims]
-#         restwave = restwave_bin[NaD_lims]
-
-#         normflux = flux/stellar_flux
-#         for mcmc_fil in sorted_paths:
-#             path, file = os.path.split(mcmc_fil)
-#             match = re.search(r'binid-(\d+)-(\d+)-samples', file)
-
-#             if match:
-#                 start_ID = int(match.group(1))
-#                 end_ID = int(match.group(2))
-
-#                 if start_ID <= binID <= end_ID:
-#                     util.verbose_print(verbose, f"    File found {file}")
-#                     data = fits.open(mcmc_fil)
-#                     data_table = Table(data[1].data)
-
-#                     all_bins = data_table['bin'].data
-
-#                     i = np.where(binID == all_bins)[0][0]
-#                     samples = data_table[i]['samples']
-#                     percentiles = data_table[i]['percentiles']
-#                     theta = percentiles[:,0]
-#                     model_dict = model_nai.model_NaI(theta, z, restwave)
-
-#                     flat_samples = samples[:,1000:,:].reshape(-1, 4)
-#                     labels_units = [r'$\lambda_{0}\ \left( \mathrm{\AA} \right)$', r'$\mathrm{log}N\ \left( \mathrm{cm^{-2}} \right)$', r'$b_D\ \left( \mathrm{km\ s^{-1}} \right)$', r'$C_f$']
-#                     labels = [r'$\lambda_{0}$', r'$\mathrm{log}N$', r'$b_D$', r'$C_f$']
-#                     param_names = ['lambda', 'logN', 'bD', 'Cf']
-
-#                     df_samples = pd.DataFrame(flat_samples, columns = param_names)
-
-#                     c = ChainConsumer()
-#                     chain = Chain(
-#                         samples = df_samples,
-#                         name = f"Bin {binID}",
-#                         color = 'gray',
-#                         shade_gradient=2,
-#                         sigmas = np.linspace(0,1,8).tolist(),
-#                         smooth=2,
-#                         bins=25,
-#                         plot_point = True,
-#                         plot_cloud = True,
-#                         marker_style = 'x',
-#                         marker_size = 100,
-#                         num_cloud = 10000,
-#                         shade = True,
-#                         linewidth = 1,
-#                         show_contour_labels = False,
-#                         linestyle='-',
-#                         drawstyles = 'steps'
-#                     )
-#                     c.add_chain(chain)
-#                     truth_dict = dict(zip(param_names, theta))
-#                     c.add_truth(Truth(location=truth_dict))
-#                     param_label_map = dict(zip(param_names, labels_units))
-#                     c.set_plot_config(
-#                         PlotConfig(
-#                             labels=param_label_map,
-#                             #plot_hists=True,
-#                             extents={'lambda':(5896.6,5897.1), 'logN':(13, 14.), 'bD':(60,110), 'Cf':(0.25, 0.6)},
-#                             label_font_size=16
-#                             )
-#                     )
-#                     fig = c.plotter.plot()
-
-#                     # Single flux + model plot on the right  
-#                     ax_spec = fig.add_axes([0.7, 0.7, 0.225, 0.225]) # [left, bottom, width, height] in figure coords
-
-#                     # Plot observed flux and best-fit model on same axes
-#                     ax_spec.plot(restwave, normflux, 'k', linewidth=1, drawstyle='steps-mid')
-#                     ax_spec.plot(model_dict['modwv'], model_dict['modflx'], 'b', 
-#                                 linewidth=1.5, label='Best Fit Model')
-
-#                     ax_spec.set_xlabel(r'Wavelength $\left( \mathrm{\AA} \right)$')
-#                     ax_spec.set_ylabel('Normalized Flux')
-#                     ax_spec.grid(True, alpha=0.3)
-#                     ax_spec.set_xlim(NaD_window)
-#                     if show:
-#                         plt.show()
-
-#                     if save:
-#                         output_dir = defaults.get_fig_paths(galname, bin_method, subdir = 'inspection')
-#                         fname = f"Samples_corner_bin_{binID}.pdf"
-#                         figpath = os.path.join(output_dir, fname)
-#                         plt.savefig(figpath, bbox_inches='tight')
-#                         util.verbose_print(verbose, f"   Figure saved to {figpath}\n")
-#                         plt.close()
-#                     break
-#         else:
-#             print(f'No file found for bin {binID}\n')
+        figpath = os.path.join(output_dir, fname)
+        plt.savefig(figpath, bbox_inches='tight')
+        util.verbose_print(verbose, f'Incidence figure saved to {figpath}')
+    if show:
+        plt.show()
+    else:
+        plt.close()

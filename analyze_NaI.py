@@ -15,12 +15,12 @@ import maps.NaI_Velocity
 import maps.SFR
 import maps.redshift
 import maps.BPT
+import maps.metallicity
 from modules import util, defaults, file_handler, inspect
 import maps
 import mcmc_results
 import plot_results
 
-### TODO: Add argument to put lines on inspect plot
 
 def get_args():    
     parser = argparse.ArgumentParser(description="A script to create an equivalent width map of ISM Na I for beta-corrected DAP outputs.")
@@ -29,7 +29,7 @@ def get_args():
     parser.add_argument('bin_method',type=str,help='Input DAP patial binning method.')
     parser.add_argument('--verbose', help='Print verbose outputs. (Default: False)', action='store_true', default=False)
     parser.add_argument('--newfile', help='Send the current local_maps fits file to /backups/ instead of attempting to overwrite. (Default: False)', action='store_true', default=False)
-    parser.add_argument('--manual', help='Use the manually set EW thresholds for masking in thresholds.yaml. (Default: False)', action='store_true', default=False)
+    parser.add_argument('--thresh', help='Compute EW thresholds for masking in thresholds.yaml. (Default: False)', action='store_true', default=False)
     parser.add_argument('--paper', help = "Make plots exclusively for the manuscript (default: False)", action='store_true', default = False)
     
     return parser.parse_args()
@@ -115,7 +115,7 @@ def main(args):
     galname = args.galname
     bin_method = args.bin_method
     verbose = args.verbose
-    manual = args.manual
+    thresh = args.thresh
     paper = args.paper
     analysis_plan = defaults.analysis_plans()
     corr_key = 'BETA-CORR'
@@ -185,11 +185,10 @@ def main(args):
     mcmc_results.make_mcmc_results_cube(galname, bin_method, verbose=verbose)
 
     ####### NaD VELOCITY #######
-    maps.NaI_Velocity.make_vmap(galname, bin_method, manual=manual, verbose=verbose)
+    maps.NaI_Velocity.make_vmap(galname, bin_method, thresh=thresh, verbose=verbose)
         
     ####### Terminal VELOCITY #######
     maps.NaI_Velocity.make_terminal_vmap(galname, bin_method, verbose=verbose)
-    util.verbose_print(verbose, f"Analysis Complete!")
 
     ####### HII #######
     # collaboration.Hii.write_fluxes(galname, bin_method, exists_ok=True, verbose=verbose)
@@ -199,9 +198,14 @@ def main(args):
     ####### BPT #######
     maps.BPT.classify_galaxy_bpt(galname, bin_method, verbose=verbose)
 
+    
+    # maps.metallicity.make_metallicity_map(galname, bin_method, verbose=verbose)
+
     ####### BAROLO #######
     collaboration.barolo.analysis_run(galname, bin_method, verbose=verbose)
     
+    util.sys_message(f"Analysis Complete!", color='green', verbose=verbose)
+
     ###### RESULT PLOTTTING #######
     plot_results.make_plots(galname, bin_method, paper=paper, verbose=verbose)
 
